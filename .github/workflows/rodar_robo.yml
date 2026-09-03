@@ -2,18 +2,19 @@ name: Executar Robô de Download Automático
 
 on:
   schedule:
-    # Roda automaticamente a cada 2 horas (00:00, 02:00, 04:00, etc)
+    # Roda automaticamente a cada 2 horas
     - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
-      url_jogo:
-        description: 'Link do jogo (deixe em branco para atualizar TODOS)'
+      url_manual:
+        description: 'URL do jogo para testar (Modyolo ou Modplays)'
         required: false
         default: ''
 
 jobs:
   extrair:
     runs-on: ubuntu-latest
+
     steps:
       - name: Baixar codigo do repositorio
         uses: actions/checkout@v3
@@ -23,15 +24,16 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Playwright e Dependencias
+      - name: Instalar Dependencias
         run: |
-          pip install playwright requests
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
           playwright install chromium
 
       - name: Executar Robô
         run: |
-          if [ -n "${{ github.event.inputs.url_jogo }}" ]; then
-            python extrair.py "${{ github.event.inputs.url_jogo }}"
+          if [ -n "${{ github.event.inputs.url_manual }}" ]; then
+            python extrair.py "${{ github.event.inputs.url_manual }}"
           else
             python extrair.py
           fi
