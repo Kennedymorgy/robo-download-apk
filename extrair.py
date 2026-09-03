@@ -15,6 +15,7 @@ def extrair_link_direto(url_alvo):
         
         link_final = None
 
+        # Intercepta as requisições de rede para capturar o APK assim que ele é chamado
         def interceptar_resposta(response):
             nonlocal link_final
             url = response.url
@@ -24,22 +25,26 @@ def extrair_link_direto(url_alvo):
         page.on("response", interceptar_resposta)
 
         try:
-            page.goto(url_alvo, wait_until="load", timeout=30000)
-            page.wait_for_timeout(3000)
+            page.goto(url_alvo, wait_until="domcontentloaded", timeout=60000)
+            
+            # ESPERA O TIMER DO SITE (10 a 15 segundos)
+            print("Aguardando o timer da página carregar o botão real...")
+            page.wait_for_timeout(12000)
 
-            # Extrai todas as tags 'a' e procura por links que apontem diretamente para o servidor de arquivos
+            # Busca por links gerados após o timer
             hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
             for href in hrefs:
                 if ("dl.modplays.com" in href or "files.modyolo.com" in href or href.endswith(".apk")) and "play.google.com" not in href:
                     link_final = href
                     break
 
-            # Se não achou estático, faz clique direto no botão principal do Modplays
+            # Se não pegou link direto no href, tenta clicar no botão azul de download
             if not link_final:
-                btn = page.query_selector("a[href*='dl.modplays.com'], a.download-button, a.btn-download, #download-btn")
+                print("Tentando clicar no botão de download após o timer...")
+                btn = page.query_selector("a[href*='download'], a.download-button, a.btn-download, .download-btn, a[aria-label*='Download']")
                 if btn:
                     btn.click(force=True, timeout=5000)
-                    page.wait_for_timeout(4000)
+                    page.wait_for_timeout(5000)
 
         except Exception as e:
             print(f"Erro na navegação: {e}")
