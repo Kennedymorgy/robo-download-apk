@@ -1,44 +1,63 @@
-import asyncio
-import os
 import sys
-from playwright.async_api import async_playwright
+import os
+import requests
+from playwright.sync_api import sync_playwright
 
-async def obter_link_direto(url_alvo):
+def extrair_link(url_alvo):
     print(f"Iniciando busca para a URL: {url_alvo}")
-    async with async_playwright() as p:
-        # Abre o navegador invisível simulando um celular Android
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 13; SM-A256E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-        )
-        page = await context.new_page()
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        
+        # Acessa a URL do jogo
+        page.goto(url_alvo, wait_until="networkidle")
+        
+        print("Aguardando geração do link interno...")
+        page.wait_for_timeout(5000) # espera 5 segundos
+        
+        link_final = None
+        
+        # Procura por links de download direto (Modyolo / LiteAPKs)
+        links = page.query_selector_all("a")
+        for link in links:
+            href = link.get_attribute("href")
+            if href and ("files.modyolo.com" in href or "download" in href and ".apk" in href):
+                link_final = href
+                break
+                
+        browser.close()
+        
+        if link_final:
+            print(f"LINK_ENCONTRADO:{link_final}")
+            salvar_no_firebase(url_alvo, link_final)
+        else:
+            print("Nenhum link direto encontrado.")
 
-        try:
-            # Acesse a página do jogo
-            await page.goto(url_alvo, wait_until="domcontentloaded", timeout=60000)
-            
-            # Espera 6 segundos para o timer interno do Modyolo rodar
-            print("Aguardando geração do link interno...")
-            await page.wait_for_timeout(6000)
-            
-            # Procura por links contendo .apk ou servidores conhecidos
-            links = await page.query_selector_all('a[href]')
-            for link in links:
-                href = await link.get_attribute('href')
-                if href and ('.apk' in href or 'files.modyolo.com' in href or 'download.liteapks.dev' in href):
-                    print(f"LINK_ENCONTRADO:{href}")
-                    await browser.close()
-                    return href
-
-            print("Nenhum link direto foi localizado.")
-            await browser.close()
-            return None
-
-        except Exception as e:
-            print(f"Erro ao acessar página: {e}")
-            await browser.close()
-            return None
+def salvar_no_firebase(url_origem, link_direto):
+    firebase_url = "https://meublog-apks-default-rtdb.firebaseio.com/links.json"
+    
+    # Limpa a URL de origem para usar como chave simples
+    id_jogo = url_origem.split("/")[-2] if "/" in url_origem else "jogo"
+    
+    dados = {
+        "url_original": url_origem,
+        "link_direto": link_direto
+    }
+    
+    try:
+        response = requests.patch(f"https://meublog-apks-default-rtdb.firebaseio.com/links/{id_jogo}.json", json=dados)
+        if response.status_code == 200:
+            print("Link salvo no Firebase com sucesso!")
+        else:
+            print(f"Erro ao salvar no Firebase: {response.status_code}")
+    except Exception as e:
+        print(f"Erro na conexão com Firebase: {e}")
 
 if __name__ == "__main__":
-    target_url = sys.argv[1] if len(sys.argv) > 1 else "https://modyolo.com/download/baseball-9-21102/1"
-    asyncio.run(obter_link_direto(target_url))
+    if len(sys.argv) > 1:
+        url = sys.argv[1]
+    else:
+        url = "https://modyolo.com/download/baseball-9-21102/1"
+        
+    extrair_link(url)
