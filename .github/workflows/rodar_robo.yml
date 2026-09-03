@@ -1,0 +1,32 @@
+name: Executar Robô de Download
+
+on:
+  workflow_dispatch:
+    inputs:
+      url_jogo:
+        description: 'URL do jogo (Modyolo/LiteAPKs)'
+        required: true
+        default: 'https://modyolo.com/download/baseball-9-21102/1'
+
+jobs:
+  extrair:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Baixar codigo do repositorio
+      uses: actions/checkout@v3
+
+    - name: Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Instalar Playwright e Navegador
+      run: |
+        python -m pip install --upgrade pip
+        pip install playwright
+        playwright install chromium
+
+    - name: Executar Robô de Extração
+      run: |
+        python extrair.py "${{ github.event.inputs.url_jogo }}"
