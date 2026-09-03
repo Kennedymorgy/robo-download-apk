@@ -8,6 +8,40 @@ try:
 except ImportError:
     stealth_sync = None
 
+# Pega as chaves salvas nos Secrets do GitHub
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
+def enviar_notificacao_telegram(nome_jogo, url_origem, link_apk):
+    """Envia mensagem no Telegram quando um jogo é atualizado."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("⚠️ Telegram não configurado nos Secrets. Pulando notificação.")
+        return
+
+    mensagem = (
+        f"🔥 **JOGO ATUALIZADO!**\n\n"
+        f"🎮 **Jogo:** `{nome_jogo}`\n"
+        f"🔗 **Página:** [Acessar no Blog]({url_origem})\n\n"
+        f"⚡ _Link direto do APK extraído e atualizado no sistema com sucesso!_"
+    )
+
+    url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": mensagem,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": False
+    }
+
+    try:
+        res = requests.post(url_api, json=payload)
+        if res.status_code == 200:
+            print(f"📢 Notificação enviada para o Telegram sobre: {nome_jogo}")
+        else:
+            print(f"❌ Erro ao enviar Telegram: {res.text}")
+    except Exception as e:
+        print(f"❌ Erro na API do Telegram: {e}")
+
 def buscar_link_atual_firebase(id_jogo):
     """Consulta o Firebase para ver qual link já está salvo."""
     firebase_base_url = "https://meublog-apks-default-rtdb.firebaseio.com"
@@ -43,6 +77,8 @@ def salvar_no_firebase_se_novo(url_origem, link_novo):
         res2 = requests.patch(f"{firebase_base_url}/jogos/{id_jogo}.json", json=payload)
         if res1.status_code == 200:
             print(f"✅ Link atualizado com sucesso no Firebase para: {id_jogo}")
+            # Dispara a notificação automática no Telegram!
+            enviar_notificacao_telegram(id_jogo, url_origem, link_novo)
     except Exception as e:
         print(f"❌ Erro ao salvar no Firebase: {e}")
 
