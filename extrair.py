@@ -2,20 +2,46 @@ import sys
 import os
 import requests
 from playwright.sync_api import sync_playwright
+try:
+    from playwright_stealth import stealth_sync
+except ImportError:
+    stealth_sync = None
 
 def extrair_link_direto(url_alvo):
     print(f"Iniciando extração para: {url_alvo}")
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+        # Lança Chromium com argumentos para evitar detecção do Cloudflare
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-infobars',
+                '--window-size=375,812',
+            ]
         )
+        
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Linux; Android 13; SM-G998B) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            viewport={"width": 375, "height": 812},
+            is_mobile=True,
+            has_touch=True,
+            locale="pt-BR"
+        )
+        
         page = context.new_page()
         
+        # Aplica stealth se disponível
+        if stealth_sync:
+            stealth_sync(page)
+        else:
+            # Script manual anti-bot básico
+            page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
+
         link_final = None
 
-        # Intercepta as requisições de rede
         def interceptar_resposta(response):
             nonlocal link_final
             url = response.url
@@ -25,52 +51,54 @@ def extrair_link_direto(url_alvo):
         page.on("response", interceptar_resposta)
 
         try:
+            # Carrega a página
             page.goto(url_alvo, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(4000)
 
-            # 1. Clica no primeiro botão de download visível para ativar o timer/geração
-            print("Procurando e clicando no botão para iniciar...")
-            botoes_iniciais = page.locator("a, button, div.download-btn, .btn-download").all()
-            for b in botoes_iniciais:
+            # Verifica se caiu no Cloudflare e espera passar
+            if "cloudflare" in page.content().lower() or "just a moment" in page.title().lower():
+                print("Detectado Cloudflare Challenge, aguardando resolução...")
+                page.wait_for_timeout(8000)
+
+            # 1. Clique inicial no botão de download para ativar o timer
+            print("Procurando botão inicial de download...")
+            botoes = page.locator("a, button").all()
+            for b in botoes:
                 try:
-                    texto = b.inner_text().lower()
+                    texto = (b.inner_text() or "").lower()
                     href = b.get_attribute("href") or ""
                     if ("download" in texto or "download" in href) and "play.google.com" not in href:
                         b.click(force=True, timeout=3000)
-                        print("Botão inicial clicado!")
+                        print("Botão acionado com sucesso!")
                         break
                 except:
                     continue
 
-            # 2. Aguarda 16 segundos para o timer/gerador de link finalizar
-            print("Aguardando 16 segundos pelo timer/gerador do Modplays...")
-            page.wait_for_timeout(16000)
+            # 2. Espera o timer (15 segundos)
+            print("Aguardando 15s pelo timer do Modplays...")
+            page.wait_for_timeout(15000)
 
-            # 3. Varredura nos links da página pós-timer
+            # 3. Busca o link direto pós-timer
             hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
             for href in hrefs:
                 if ("dl.modplays.com" in href or "files.modyolo.com" in href or href.endswith(".apk")) and "play.google.com" not in href:
                     link_final = href
                     break
 
-            # 4. Se ainda não pegou, tenta clicar no botão final que foi liberado após o timer
+            # 4. Tenta clicar no botão gerado após o timer
             if not link_final:
-                print("Tentando clicar no botão liberado após o timer...")
-                botoes_finais = page.locator("a, button").all()
-                for b in botoes_finais:
+                print("Tentando clicar no botão gerado pós-timer...")
+                for b in page.locator("a[href]").all():
                     try:
                         href = b.get_attribute("href") or ""
                         if ("dl.modplays.com" in href or "files.modyolo.com" in href or ".apk" in href) and "play.google.com" not in href:
-                            b.click(force=True, timeout=3000)
-                            page.wait_for_timeout(3000)
-                            if link_final:
-                                break
+                            link_final = href
+                            break
                     except:
                         continue
 
-            # Diagnóstico de segurança (se mesmo assim falhar, mostra os links para ajuste)
             if not link_final:
-                print("\n--- LINKS ENCONTRADOS NA PÁGINA PARA DIAGNÓSTICO ---")
+                print("\n--- LINKS ENCONTRADOS PÓS-CLOUDFLARE ---")
                 for h in hrefs[:15]:
                     print(f"-> {h}")
 
