@@ -15,7 +15,7 @@ def extrair_link_direto(url_alvo):
         
         link_final = None
 
-        # Intercepta as requisições de rede para capturar o APK assim que ele é chamado
+        # Intercepta as requisições de rede
         def interceptar_resposta(response):
             nonlocal link_final
             url = response.url
@@ -26,25 +26,53 @@ def extrair_link_direto(url_alvo):
 
         try:
             page.goto(url_alvo, wait_until="domcontentloaded", timeout=60000)
-            
-            # ESPERA O TIMER DO SITE (10 a 15 segundos)
-            print("Aguardando o timer da página carregar o botão real...")
-            page.wait_for_timeout(12000)
+            page.wait_for_timeout(2000)
 
-            # Busca por links gerados após o timer
+            # 1. Clica no primeiro botão de download visível para ativar o timer/geração
+            print("Procurando e clicando no botão para iniciar...")
+            botoes_iniciais = page.locator("a, button, div.download-btn, .btn-download").all()
+            for b in botoes_iniciais:
+                try:
+                    texto = b.inner_text().lower()
+                    href = b.get_attribute("href") or ""
+                    if ("download" in texto or "download" in href) and "play.google.com" not in href:
+                        b.click(force=True, timeout=3000)
+                        print("Botão inicial clicado!")
+                        break
+                except:
+                    continue
+
+            # 2. Aguarda 16 segundos para o timer/gerador de link finalizar
+            print("Aguardando 16 segundos pelo timer/gerador do Modplays...")
+            page.wait_for_timeout(16000)
+
+            # 3. Varredura nos links da página pós-timer
             hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
             for href in hrefs:
                 if ("dl.modplays.com" in href or "files.modyolo.com" in href or href.endswith(".apk")) and "play.google.com" not in href:
                     link_final = href
                     break
 
-            # Se não pegou link direto no href, tenta clicar no botão azul de download
+            # 4. Se ainda não pegou, tenta clicar no botão final que foi liberado após o timer
             if not link_final:
-                print("Tentando clicar no botão de download após o timer...")
-                btn = page.query_selector("a[href*='download'], a.download-button, a.btn-download, .download-btn, a[aria-label*='Download']")
-                if btn:
-                    btn.click(force=True, timeout=5000)
-                    page.wait_for_timeout(5000)
+                print("Tentando clicar no botão liberado após o timer...")
+                botoes_finais = page.locator("a, button").all()
+                for b in botoes_finais:
+                    try:
+                        href = b.get_attribute("href") or ""
+                        if ("dl.modplays.com" in href or "files.modyolo.com" in href or ".apk" in href) and "play.google.com" not in href:
+                            b.click(force=True, timeout=3000)
+                            page.wait_for_timeout(3000)
+                            if link_final:
+                                break
+                    except:
+                        continue
+
+            # Diagnóstico de segurança (se mesmo assim falhar, mostra os links para ajuste)
+            if not link_final:
+                print("\n--- LINKS ENCONTRADOS NA PÁGINA PARA DIAGNÓSTICO ---")
+                for h in hrefs[:15]:
+                    print(f"-> {h}")
 
         except Exception as e:
             print(f"Erro na navegação: {e}")
