@@ -1,6 +1,5 @@
 import sys
 import os
-import time
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -42,13 +41,17 @@ def extrair_link_direto(url_alvo):
 
         link_final = None
 
-        # Intercepta requisições HTTP reais (ignorando blobs e chamadas do cloudflare)
+        # Intercepta requisições HTTP ignorando scripts do Cloudflare e blobs
         def interceptar_requisicao(request):
             nonlocal link_final
             url = request.url
-            if not url.startswith("blob:") and ("dl.modplays.com" in url or "files.modyolo.com" in url or ".apk" in url):
-                if "play.google.com" not in url and "cloudflare" not in url:
-                    link_final = url
+            # Filtro rigoroso: precisa ser APK ou servidor de arquivo, e NÃO pode ser cdn-cgi / challenge
+            if "cdn-cgi" not in url and "challenge-platform" not in url and not url.startswith("blob:"):
+                if ("dl.modplays.com" in url or "files.modyolo.com" in url or ".apk" in url):
+                    if "play.google.com" not in url:
+                        # Garante que é uma URL de download válida
+                        if url.endswith(".apk") or "download" in url or "file" in url:
+                            link_final = url
 
         page.on("request", interceptar_requisicao)
 
@@ -56,6 +59,7 @@ def extrair_link_direto(url_alvo):
             page.goto(url_alvo, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(4000)
 
+            # Aguarda o Cloudflare passar se houver desafio
             if "cloudflare" in page.content().lower() or "just a moment" in page.title().lower():
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
@@ -73,24 +77,26 @@ def extrair_link_direto(url_alvo):
                 except:
                     continue
 
-            print("Aguardando 15s pelo timer do Modplays...")
-            page.wait_for_timeout(15000)
+            print("Aguardando 16s pelo timer do Modplays...")
+            page.wait_for_timeout(16000)
 
-            # Procura links <a href="..."> diretamente na página ignorando o protocolo blob
-            hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
-            for href in hrefs:
-                if not href.startswith("blob:") and ("dl.modplays.com" in href or "files.modyolo.com" in href or href.endswith(".apk")):
-                    if "play.google.com" not in href:
-                        link_final = href
-                        break
-
-            # Se ainda não encontrou o link direto, tenta capturar o evento de download do navegador
+            # Se a interceptação de rede não pegou, procura o link direto na tag <a>
             if not link_final:
-                print("Tentando clicar no botão final para disparar o download...")
+                hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
+                for href in hrefs:
+                    if "cdn-cgi" not in href and not href.startswith("blob:"):
+                        if ("dl.modplays.com" in href or "files.modyolo.com" in href or href.endswith(".apk")):
+                            if "play.google.com" not in href:
+                                link_final = href
+                                break
+
+            # Captura download direto disparado pelo navegador
+            if not link_final:
+                print("Tentando disparar download no evento do botão...")
                 for b in page.locator("a[href], button").all():
                     try:
                         href = b.get_attribute("href") or ""
-                        if ("dl.modplays.com" in href or "files.modyolo.com" in href or ".apk" in href) and not href.startswith("blob:"):
+                        if "cdn-cgi" not in href and ("dl.modplays.com" in href or href.endswith(".apk")):
                             link_final = href
                             break
                         elif "download" in (b.inner_text() or "").lower():
@@ -101,12 +107,6 @@ def extrair_link_direto(url_alvo):
                             break
                     except:
                         continue
-
-            if not link_final:
-                print("\n--- LINKS ENCONTRADOS PÓS-TIMER ---")
-                for h in hrefs[:15]:
-                    if not h.startswith("blob:"):
-                        print(f"-> {h}")
 
         except Exception as e:
             print(f"Erro na navegação: {e}")
