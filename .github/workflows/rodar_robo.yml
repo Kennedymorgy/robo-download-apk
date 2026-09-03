@@ -1,12 +1,15 @@
-name: Executar Robô de Download
+name: Executar Robô de Download Automático
 
 on:
+  schedule:
+    # Roda automaticamente a cada 2 horas (00:00, 02:00, 04:00, etc)
+    - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
       url_jogo:
-        description: 'URL da pagina de download do jogo'
-        required: true
-        default: 'https://modyolo.com/download/baseball-9-21102/1'
+        description: 'Link do jogo (deixe em branco para atualizar TODOS)'
+        required: false
+        default: ''
 
 jobs:
   extrair:
@@ -25,6 +28,10 @@ jobs:
           pip install playwright requests
           playwright install chromium
 
-      - name: Executar Robô de Extração
+      - name: Executar Robô
         run: |
-          python extrair.py "${{ github.event.inputs.url_jogo }}"
+          if [ -n "${{ github.event.inputs.url_jogo }}" ]; then
+            python extrair.py "${{ github.event.inputs.url_jogo }}"
+          else
+            python extrair.py
+          fi
