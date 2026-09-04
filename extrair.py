@@ -20,16 +20,15 @@ GREEN_API_GROUP_ID = os.environ.get("GREEN_API_GROUP_ID")
 # SEU BLOG OFICIAL (PÁGINA INICIAL)
 PAGINA_INICIAL_BLOG = "https://k-404modapk.blogspot.com/?m=1"
 
-# LOGO REDONDA / FAVICON DO SEU SITE (SÓ VAI USAR ESSA FOTO)
+# FOTO OFICIAL DO SITE
 FOTO_OFICIAL_SITE = "https://k-404modapk.blogspot.com/favicon.ico"
 
 def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
-    """Envia mensagem no Telegram com a foto oficial do site apontando para a página inicial."""
+    """Envia mensagem no Telegram com a foto oficial do site."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠️ Telegram não configurado nos Secrets. Pulando notificação.")
         return
 
-    # Mensagem 100% profissional e sem menções a extração
     mensagem = (
         f"🔥 <b>JOGO ATUALIZADO!</b>\n\n"
         f"🎮 <b>Jogo:</b> {nome_jogo}\n"
@@ -38,7 +37,6 @@ def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
         f"⚡ <i>Nova versão disponível! Clique no link acima para fazer o download com segurança.</i>"
     )
 
-    # Envio para o Telegram utilizando SEMPRE a foto oficial do seu blog
     url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -50,7 +48,6 @@ def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
     try:
         res = requests.post(url_api, json=payload)
         if res.status_code != 200:
-            print(f"⚠️ Erro ao enviar foto ({res.text}). Tentando envio de mensagem...")
             url_api_msg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
             payload_msg = {
                 "chat_id": TELEGRAM_CHAT_ID,
@@ -61,14 +58,14 @@ def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
             res = requests.post(url_api_msg, json=payload_msg)
 
         if res.status_code == 200:
-            print(f"📢 Notificação enviada para o Telegram sobre: {nome_jogo} (Versão: {versao_jogo})")
+            print(f"📢 Notificação enviada para o Telegram: {nome_jogo} ({versao_jogo})")
         else:
             print(f"❌ Erro ao enviar Telegram: {res.text}")
     except Exception as e:
         print(f"❌ Erro na API do Telegram: {e}")
 
 def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
-    """Envia mensagem no WhatsApp via GREEN-API para a comunidade."""
+    """Envia mensagem no WhatsApp via GREEN-API para a comunidade com logs detalhados."""
     if not GREEN_API_INSTANCE or not GREEN_API_TOKEN or not GREEN_API_GROUP_ID:
         print("⚠️ GREEN-API não configurada nos Secrets. Pulando WhatsApp.")
         return
@@ -81,34 +78,26 @@ def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
         f"⚡ _Nova versão disponível! Acesse o site acima para baixar com segurança._"
     )
 
-    url_api = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendFileByUrl/{GREEN_API_TOKEN}"
-    payload = {
+    # Tenta enviar primeiro apenas como mensagem de texto para garantir entrega imediata
+    url_msg = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendMessage/{GREEN_API_TOKEN}"
+    payload_msg = {
         "chatId": GREEN_API_GROUP_ID,
-        "urlFile": FOTO_OFICIAL_SITE,
-        "fileName": "logo.ico",
-        "caption": mensagem
+        "message": mensagem
     }
 
     try:
-        res = requests.post(url_api, json=payload)
-        if res.status_code != 200:
-            print(f"⚠️ Erro ao enviar foto no WhatsApp ({res.text}). Tentando apenas texto...")
-            url_msg = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendMessage/{GREEN_API_TOKEN}"
-            payload_msg = {
-                "chatId": GREEN_API_GROUP_ID,
-                "message": mensagem
-            }
-            res = requests.post(url_msg, json=payload_msg)
+        print(f"🔄 Tentando enviar WhatsApp para o grupo: {GREEN_API_GROUP_ID}")
+        res = requests.post(url_msg, json=payload_msg)
+        print(f"📥 Resposta da GREEN-API (Status {res.status_code}): {res.text}")
 
         if res.status_code == 200:
-            print(f"🟢 Notificação enviada para o WhatsApp: {nome_jogo} ({versao_jogo})")
+            print(f"🟢 Notificação enviada com sucesso para o WhatsApp: {nome_jogo} ({versao_jogo})")
         else:
-            print(f"❌ Erro ao enviar WhatsApp: {res.text}")
+            print(f"❌ Falha ao enviar WhatsApp. Verifique se a instância e o Token estão corretos no GitHub.")
     except Exception as e:
-        print(f"❌ Erro na API do WhatsApp: {e}")
+        print(f"❌ Erro crítico na API do WhatsApp: {e}")
 
 def buscar_link_atual_firebase(id_jogo):
-    """Consulta o Firebase para ver qual link já está salvo."""
     firebase_base_url = "https://meublog-apks-default-rtdb.firebaseio.com"
     try:
         res = requests.get(f"{firebase_base_url}/links/{id_jogo}/link_direto.json")
@@ -125,15 +114,13 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
 
     nome_jogo = dados_jogo.get("nome", id_jogo.replace('-', ' ').title())
     versao_jogo = dados_jogo.get("versao", "Última Versão")
-    foto_url = FOTO_OFICIAL_SITE  # Sempre salva a foto do seu blog
+    foto_url = FOTO_OFICIAL_SITE
 
-    # 1. Verifica se o link salvo no Firebase já é o mesmo
     link_atual = buscar_link_atual_firebase(id_jogo)
     if link_atual == link_novo:
         print(f"⏩ O link para '{id_jogo}' continua o mesmo. Nenhuma alteração feita no Firebase.")
         return
 
-    # 2. Se for um link novo ou diferente, faz a atualização
     print(f"🔄 Link novo detectado para '{id_jogo}'! Atualizando no Firebase...")
     firebase_base_url = "https://meublog-apks-default-rtdb.firebaseio.com"
     payload = {
@@ -149,7 +136,6 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
         res2 = requests.patch(f"{firebase_base_url}/jogos/{id_jogo}.json", json=payload)
         if res1.status_code == 200:
             print(f"✅ Link atualizado com sucesso no Firebase para: {id_jogo}")
-            # Dispara as notificações automáticas!
             enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo)
             enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo)
     except Exception as e:
@@ -213,18 +199,14 @@ def extrair_link_direto(url_alvo):
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
 
-            # --- EXTRAÇÃO DE NOME E VERSÃO DO JOGO ---
             try:
-                # Pega o título principal (H1) da página
                 h1_elem = page.locator("h1").first
                 full_title = h1_elem.inner_text().strip() if h1_elem.count() > 0 else page.title()
 
-                # Extrai versão usando expressão regular (ex: v0.4.7.7)
                 match_v = re.search(r'v?(\d+\.\d+[\.\d+]*)', full_title)
                 if match_v:
                     dados_jogo["versao"] = f"v{match_v.group(1)}"
 
-                # Limpa o título para deixar apenas o Nome do jogo
                 nome_limpo = full_title.split(" MOD")[0].split(" (")[0].split(" v")[0].strip()
                 if nome_limpo:
                     dados_jogo["nome"] = nome_limpo
@@ -261,7 +243,7 @@ def extrair_link_direto(url_alvo):
                 print("Tentando disparar download no evento do botão...")
                 for b in page.locator("a[href], button").all():
                     try:
-                        href = b.get_attribute("href") or ""
+                        href = b.get_author("href") if hasattr(b, 'get_author') else b.get_attribute("href") or ""
                         if "cdn-cgi" not in href and ("dl.modplays.com" in href or href.endswith(".apk")):
                             link_final = href
                             break
