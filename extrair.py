@@ -14,25 +14,33 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # SEU BLOG OFICIAL
-SEU_SITE_URL = "https://k-404modapk.blogspot.com/?m=1"
+BLOG_BASE_URL = "https://k-404modapk.blogspot.com"
 
-def enviar_notificacao_telegram(nome_jogo, versao_jogo, foto_url, url_origem, link_apk):
-    """Envia mensagem com FOTO no Telegram apontando para o seu Blogspot."""
+def gerar_link_post_blog(id_jogo):
+    """Gera o link direto para a postagem específica no seu Blogspot."""
+    # Transforma o ID do jogo em um caminho amigável para o Blogger
+    slug = id_jogo.lower().replace(" ", "-")
+    return f"{BLOG_BASE_URL}/search?q={slug}"
+
+def enviar_notificacao_telegram(nome_jogo, versao_jogo, foto_url, id_jogo):
+    """Envia mensagem com FOTO no Telegram apontando para a postagem no seu Blog."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠️ Telegram não configurado nos Secrets. Pulando notificação.")
         return
 
-    # Mensagem estilizada em HTML
+    url_post = gerar_link_post_blog(id_jogo)
+
+    # Mensagem 100% profissional e sem menções a extração
     mensagem = (
         f"🔥 <b>JOGO ATUALIZADO!</b>\n\n"
         f"🎮 <b>Jogo:</b> {nome_jogo}\n"
         f"📦 <b>Versão:</b> {versao_jogo}\n"
-        f"🔗 <b>Página:</b> <a href='{SEU_SITE_URL}'>Acessar no Blog</a>\n\n"
-        f"⚡ <i>Link direto do APK extraído e atualizado no sistema com sucesso!</i>"
+        f"🔗 <b>Página:</b> <a href='{url_post}'>Baixar no Blog</a>\n\n"
+        f"⚡ <i>Nova versão disponível! Clique no link acima para fazer o download com segurança.</i>"
     )
 
-    # Usa sendPhoto se houver imagem de capa, senão fallback para sendMessage
-    if foto_url:
+    # Envio para o Telegram
+    if foto_url and foto_url.startswith("http"):
         url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
         payload = {
             "chat_id": TELEGRAM_CHAT_ID,
@@ -101,7 +109,7 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
         if res1.status_code == 200:
             print(f"✅ Link atualizado com sucesso no Firebase para: {id_jogo}")
             # Dispara a notificação automática no Telegram!
-            enviar_notificacao_telegram(nome_jogo, versao_jogo, foto_url, url_origem, link_novo)
+            enviar_notificacao_telegram(nome_jogo, versao_jogo, foto_url, id_jogo)
     except Exception as e:
         print(f"❌ Erro ao salvar no Firebase: {e}")
 
@@ -163,13 +171,13 @@ def extrair_link_direto(url_alvo):
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
 
-            # --- EXTRAÇÃO DE NOME, VERSÃO E FOTO ---
+            # --- EXTRAÇÃO DE NOME, VERSÃO E FOTO REAL DO JOGO ---
             try:
                 # Pega o título principal (H1) da página
                 h1_elem = page.locator("h1").first
                 full_title = h1_elem.inner_text().strip() if h1_elem.count() > 0 else page.title()
 
-                # Extrai versão usando expressão regular (ex: v2.737.1584 ou 2.737)
+                # Extrai versão usando expressão regular (ex: v0.4.7.7)
                 match_v = re.search(r'v?(\d+\.\d+[\.\d+]*)', full_title)
                 if match_v:
                     dados_jogo["versao"] = f"v{match_v.group(1)}"
@@ -179,11 +187,11 @@ def extrair_link_direto(url_alvo):
                 if nome_limpo:
                     dados_jogo["nome"] = nome_limpo
 
-                # Busca a imagem da capa/ícone
-                img_elem = page.locator("img[src*='modplays'], img[src*='modyolo'], img[class*='thumb'], img[class*='icon']").first
+                # Busca específica pela capa/ícone do jogo (ignorando banners de topo/logo do site)
+                img_elem = page.locator("div.app-icon img, .entry-content img, img[alt*='MOD'], img[class*='app-icon']").first
                 if img_elem.count() > 0:
                     src = img_elem.get_attribute("src")
-                    if src and src.startswith("http"):
+                    if src and src.startswith("http") and "logo" not in src.lower():
                         dados_jogo["foto"] = src
             except Exception as err_meta:
                 print(f"⚠️ Erro ao extrair metadados da página: {err_meta}")
