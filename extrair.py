@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -12,31 +13,46 @@ except ImportError:
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-def enviar_notificacao_telegram(nome_jogo, url_origem, link_apk):
-    """Envia mensagem no Telegram quando um jogo é atualizado."""
+# SEU BLOG OFICIAL
+SEU_SITE_URL = "https://k-404modapk.blogspot.com/?m=1"
+
+def enviar_notificacao_telegram(nome_jogo, versao_jogo, foto_url, url_origem, link_apk):
+    """Envia mensagem com FOTO no Telegram apontando para o seu Blogspot."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠️ Telegram não configurado nos Secrets. Pulando notificação.")
         return
 
+    # Mensagem estilizada em HTML
     mensagem = (
-        f"🔥 **JOGO ATUALIZADO!**\n\n"
-        f"🎮 **Jogo:** `{nome_jogo}`\n"
-        f"🔗 **Página:** [Acessar no Blog]({url_origem})\n\n"
-        f"⚡ _Link direto do APK extraído e atualizado no sistema com sucesso!_"
+        f"🔥 <b>JOGO ATUALIZADO!</b>\n\n"
+        f"🎮 <b>Jogo:</b> {nome_jogo}\n"
+        f"📦 <b>Versão:</b> {versao_jogo}\n"
+        f"🔗 <b>Página:</b> <a href='{SEU_SITE_URL}'>Acessar no Blog</a>\n\n"
+        f"⚡ <i>Link direto do APK extraído e atualizado no sistema com sucesso!</i>"
     )
 
-    url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": mensagem,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": False
-    }
+    # Usa sendPhoto se houver imagem de capa, senão fallback para sendMessage
+    if foto_url:
+        url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "photo": foto_url,
+            "caption": mensagem,
+            "parse_mode": "HTML"
+        }
+    else:
+        url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": mensagem,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": False
+        }
 
     try:
         res = requests.post(url_api, json=payload)
         if res.status_code == 200:
-            print(f"📢 Notificação enviada para o Telegram sobre: {nome_jogo}")
+            print(f"📢 Notificação enviada para o Telegram sobre: {nome_jogo} (Versão: {versao_jogo})")
         else:
             print(f"❌ Erro ao enviar Telegram: {res.text}")
     except Exception as e:
@@ -53,10 +69,14 @@ def buscar_link_atual_firebase(id_jogo):
         print(f"Erro ao consultar Firebase: {e}")
     return None
 
-def salvar_no_firebase_se_novo(url_origem, link_novo):
+def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
     partes = url_origem.rstrip('/').split('/')
     id_jogo = partes[-2] if len(partes) >= 2 else "jogo"
     id_jogo = id_jogo.replace('.html', '').replace('.a', '')
+
+    nome_jogo = dados_jogo.get("nome", id_jogo.replace('-', ' ').title())
+    versao_jogo = dados_jogo.get("versao", "Última Versão")
+    foto_url = dados_jogo.get("foto", "")
 
     # 1. Verifica se o link salvo no Firebase já é o mesmo
     link_atual = buscar_link_atual_firebase(id_jogo)
@@ -69,7 +89,10 @@ def salvar_no_firebase_se_novo(url_origem, link_novo):
     firebase_base_url = "https://meublog-apks-default-rtdb.firebaseio.com"
     payload = {
         "url_original": url_origem,
-        "link_direto": link_novo
+        "link_direto": link_novo,
+        "nome": nome_jogo,
+        "versao": versao_jogo,
+        "foto": foto_url
     }
 
     try:
@@ -78,12 +101,18 @@ def salvar_no_firebase_se_novo(url_origem, link_novo):
         if res1.status_code == 200:
             print(f"✅ Link atualizado com sucesso no Firebase para: {id_jogo}")
             # Dispara a notificação automática no Telegram!
-            enviar_notificacao_telegram(id_jogo, url_origem, link_novo)
+            enviar_notificacao_telegram(nome_jogo, versao_jogo, foto_url, url_origem, link_novo)
     except Exception as e:
         print(f"❌ Erro ao salvar no Firebase: {e}")
 
 def extrair_link_direto(url_alvo):
     print(f"Iniciando extração para: {url_alvo}")
+
+    dados_jogo = {
+        "nome": "Jogo Desconhecido",
+        "versao": "Última Versão",
+        "foto": None
+    }
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -134,6 +163,31 @@ def extrair_link_direto(url_alvo):
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
 
+            # --- EXTRAÇÃO DE NOME, VERSÃO E FOTO ---
+            try:
+                # Pega o título principal (H1) da página
+                h1_elem = page.locator("h1").first
+                full_title = h1_elem.inner_text().strip() if h1_elem.count() > 0 else page.title()
+
+                # Extrai versão usando expressão regular (ex: v2.737.1584 ou 2.737)
+                match_v = re.search(r'v?(\d+\.\d+[\.\d+]*)', full_title)
+                if match_v:
+                    dados_jogo["versao"] = f"v{match_v.group(1)}"
+
+                # Limpa o título para deixar apenas o Nome do jogo
+                nome_limpo = full_title.split(" MOD")[0].split(" (")[0].split(" v")[0].strip()
+                if nome_limpo:
+                    dados_jogo["nome"] = nome_limpo
+
+                # Busca a imagem da capa/ícone
+                img_elem = page.locator("img[src*='modplays'], img[src*='modyolo'], img[class*='thumb'], img[class*='icon']").first
+                if img_elem.count() > 0:
+                    src = img_elem.get_attribute("src")
+                    if src and src.startswith("http"):
+                        dados_jogo["foto"] = src
+            except Exception as err_meta:
+                print(f"⚠️ Erro ao extrair metadados da página: {err_meta}")
+
             print("Procurando botão inicial de download...")
             botoes = page.locator("a, button").all()
             for b in botoes:
@@ -180,14 +234,14 @@ def extrair_link_direto(url_alvo):
             print(f"Erro na navegação: {e}")
 
         browser.close()
-        return link_final
+        return link_final, dados_jogo
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1].startswith("http"):
         url_single = sys.argv[1]
-        link = extrair_link_direto(url_single)
+        link, dados_jogo = extrair_link_direto(url_single)
         if link:
-            salvar_no_firebase_se_novo(url_single, link)
+            salvar_no_firebase_se_novo(url_single, link, dados_jogo)
             print(f"LINK_ENCONTRADO:{link}")
         else:
             print("Nenhum link direto encontrado.")
