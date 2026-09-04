@@ -13,54 +13,54 @@ except ImportError:
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# SEU BLOG OFICIAL
-BLOG_BASE_URL = "https://k-404modapk.blogspot.com"
+# SEU BLOG OFICIAL (PÁGINA INICIAL)
+SEU_SITE_URL = "https://k-404modapk.blogspot.com/?m=1"
 
-def gerar_link_post_blog(id_jogo):
-    """Gera o link direto para a postagem específica no seu Blogspot."""
-    # Transforma o ID do jogo em um caminho amigável para o Blogger
-    slug = id_jogo.lower().replace(" ", "-")
-    return f"{BLOG_BASE_URL}/search?q={slug}"
+# LOGO PADRÃO DO SEU SITE (Usada caso a foto do jogo não seja encontrada)
+LOGO_PADRAO_SITE = "https://k-404modapk.blogspot.com/favicon.ico"
 
-def enviar_notificacao_telegram(nome_jogo, versao_jogo, foto_url, id_jogo):
-    """Envia mensagem com FOTO no Telegram apontando para a postagem no seu Blog."""
+def enviar_notificacao_telegram(nome_jogo, versao_jogo, foto_url):
+    """Envia mensagem no Telegram apontando para o início do seu site com foto do jogo/site."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠️ Telegram não configurado nos Secrets. Pulando notificação.")
         return
 
-    url_post = gerar_link_post_blog(id_jogo)
-
-    # Mensagem 100% profissional e sem menções a extração
+    # Mensagem estilizada em HTML
     mensagem = (
         f"🔥 <b>JOGO ATUALIZADO!</b>\n\n"
         f"🎮 <b>Jogo:</b> {nome_jogo}\n"
         f"📦 <b>Versão:</b> {versao_jogo}\n"
-        f"🔗 <b>Página:</b> <a href='{url_post}'>Baixar no Blog</a>\n\n"
-        f"⚡ <i>Nova versão disponível! Clique no link acima para fazer o download com segurança.</i>"
+        f"🔗 <b>Página:</b> <a href='{SEU_SITE_URL}'>Baixar no Blog</a>\n\n"
+        f"⚡ <i>Nova versão disponível! Acesse o nosso blog para baixar com segurança.</i>"
     )
 
-    # Envio para o Telegram
-    if foto_url and foto_url.startswith("http"):
-        url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "photo": foto_url,
-            "caption": mensagem,
-            "parse_mode": "HTML"
-        }
-    else:
-        url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": mensagem,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": False
-        }
+    # Prioriza a foto capturada; se não tiver, usa a logo padrão
+    foto_final = foto_url if (foto_url and foto_url.startswith("http")) else LOGO_PADRAO_SITE
+
+    url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "photo": foto_final,
+        "caption": mensagem,
+        "parse_mode": "HTML"
+    }
 
     try:
         res = requests.post(url_api, json=payload)
+        # Se falhar o envio por foto (ex: link de imagem inválido), tenta como mensagem padrão
+        if res.status_code != 200:
+            print(f"⚠️ Erro ao enviar foto ({res.text}). Tentando envio sem foto...")
+            url_api_msg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            payload_msg = {
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": mensagem,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": False
+            }
+            res = requests.post(url_api_msg, json=payload_msg)
+
         if res.status_code == 200:
-            print(f"📢 Notificação enviada para o Telegram sobre: {nome_jogo} (Versão: {versao_jogo})")
+            print(f"📢 Notificação enviada para o Telegram sobre: {nome_jogo} ({versao_jogo})")
         else:
             print(f"❌ Erro ao enviar Telegram: {res.text}")
     except Exception as e:
@@ -108,8 +108,8 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
         res2 = requests.patch(f"{firebase_base_url}/jogos/{id_jogo}.json", json=payload)
         if res1.status_code == 200:
             print(f"✅ Link atualizado com sucesso no Firebase para: {id_jogo}")
-            # Dispara a notificação automática no Telegram!
-            enviar_notificacao_telegram(nome_jogo, versao_jogo, foto_url, id_jogo)
+            # Dispara a notificação no Telegram enviando a foto e direcionando pro início do blog
+            enviar_notificacao_telegram(nome_jogo, versao_jogo, foto_url)
     except Exception as e:
         print(f"❌ Erro ao salvar no Firebase: {e}")
 
@@ -171,30 +171,33 @@ def extrair_link_direto(url_alvo):
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
 
-            # --- EXTRAÇÃO DE NOME, VERSÃO E FOTO REAL DO JOGO ---
+            # --- EXTRAÇÃO DE NOME, VERSÃO E ÍCONE DO JOGO ---
             try:
-                # Pega o título principal (H1) da página
+                # Pega o título H1
                 h1_elem = page.locator("h1").first
                 full_title = h1_elem.inner_text().strip() if h1_elem.count() > 0 else page.title()
 
-                # Extrai versão usando expressão regular (ex: v0.4.7.7)
+                # Extrai a versão
                 match_v = re.search(r'v?(\d+\.\d+[\.\d+]*)', full_title)
                 if match_v:
                     dados_jogo["versao"] = f"v{match_v.group(1)}"
 
-                # Limpa o título para deixar apenas o Nome do jogo
+                # Limpa o título do jogo
                 nome_limpo = full_title.split(" MOD")[0].split(" (")[0].split(" v")[0].strip()
                 if nome_limpo:
                     dados_jogo["nome"] = nome_limpo
 
-                # Busca específica pela capa/ícone do jogo (ignorando banners de topo/logo do site)
-                img_elem = page.locator("div.app-icon img, .entry-content img, img[alt*='MOD'], img[class*='app-icon']").first
+                # Busca o ícone/imagem quadrada pequena do jogo
+                img_elem = page.locator("img[src*='icon'], img[class*='icon'], img[class*='avatar'], img[src*='thumb']").first
+                if img_elem.count() == 0:
+                    img_elem = page.locator("div.app-icon img, img[alt*='MOD']").first
+
                 if img_elem.count() > 0:
                     src = img_elem.get_attribute("src")
                     if src and src.startswith("http") and "logo" not in src.lower():
                         dados_jogo["foto"] = src
             except Exception as err_meta:
-                print(f"⚠️ Erro ao extrair metadados da página: {err_meta}")
+                print(f"⚠️ Erro ao extrair metadados: {err_meta}")
 
             print("Procurando botão inicial de download...")
             botoes = page.locator("a, button").all()
