@@ -65,12 +65,11 @@ def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
         print(f"❌ Erro na API do Telegram: {e}")
 
 def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
-    """Envia mensagem no WhatsApp via GREEN-API com Foto + Legenda exatamente igual ao Telegram."""
+    """Envia mensagem no WhatsApp via GREEN-API com Foto + Legenda."""
     if not GREEN_API_INSTANCE or not GREEN_API_TOKEN or not GREEN_API_GROUP_ID:
         print("⚠️ GREEN-API não configurada nos Secrets. Pulando WhatsApp.")
         return
 
-    # Garante a terminação correta do ID do grupo (@g.us)
     chat_id = GREEN_API_GROUP_ID.strip()
     if not chat_id.endswith("@g.us") and not chat_id.endswith("@c.us"):
         chat_id = f"{chat_id}@g.us"
@@ -83,11 +82,12 @@ def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
         f"⚡ _Nova versão disponível! Clique no link acima para fazer o download com segurança._"
     )
 
+    # Tentativa com imagem usando sendFileByUrl
     url_file = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendFileByUrl/{GREEN_API_TOKEN}"
     payload_file = {
         "chatId": chat_id,
         "urlFile": FOTO_OFICIAL_SITE,
-        "fileName": "k404.ico",
+        "fileName": "icon.ico",
         "caption": mensagem
     }
 
@@ -96,8 +96,9 @@ def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
         res = requests.post(url_file, json=payload_file)
         print(f"📥 Resposta da GREEN-API (Status {res.status_code}): {res.text}")
 
-        # Se houver falha no envio da imagem, envia apenas o texto
+        # Se falhar o envio com foto, faz fallback enviando apenas a mensagem de texto
         if res.status_code != 200:
+            print("⚠️ Falha no envio de arquivo. Tentando enviar como texto simples...")
             url_msg = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendMessage/{GREEN_API_TOKEN}"
             payload_msg = {
                 "chatId": chat_id,
