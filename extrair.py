@@ -65,30 +65,45 @@ def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
         print(f"❌ Erro na API do Telegram: {e}")
 
 def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
-    """Envia mensagem no WhatsApp via GREEN-API para a comunidade com logs detalhados."""
+    """Envia mensagem no WhatsApp via GREEN-API com Foto + Legenda exatamente igual ao Telegram."""
     if not GREEN_API_INSTANCE or not GREEN_API_TOKEN or not GREEN_API_GROUP_ID:
         print("⚠️ GREEN-API não configurada nos Secrets. Pulando WhatsApp.")
         return
+
+    # Garante a terminação correta do ID do grupo (@g.us)
+    chat_id = GREEN_API_GROUP_ID.strip()
+    if not chat_id.endswith("@g.us") and not chat_id.endswith("@c.us"):
+        chat_id = f"{chat_id}@g.us"
 
     mensagem = (
         f"🔥 *JOGO ATUALIZADO!*\n\n"
         f"🎮 *Jogo:* {nome_jogo}\n"
         f"📦 *Versão:* {versao_jogo}\n"
-        f"🔗 *Baixar:* {PAGINA_INICIAL_BLOG}\n\n"
-        f"⚡ _Nova versão disponível! Acesse o site acima para baixar com segurança._"
+        f"🔗 *Página:* {PAGINA_INICIAL_BLOG}\n\n"
+        f"⚡ _Nova versão disponível! Clique no link acima para fazer o download com segurança._"
     )
 
-    # Tenta enviar primeiro apenas como mensagem de texto para garantir entrega imediata
-    url_msg = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendMessage/{GREEN_API_TOKEN}"
-    payload_msg = {
-        "chatId": GREEN_API_GROUP_ID,
-        "message": mensagem
+    url_file = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendFileByUrl/{GREEN_API_TOKEN}"
+    payload_file = {
+        "chatId": chat_id,
+        "urlFile": FOTO_OFICIAL_SITE,
+        "fileName": "k404.ico",
+        "caption": mensagem
     }
 
     try:
-        print(f"🔄 Tentando enviar WhatsApp para o grupo: {GREEN_API_GROUP_ID}")
-        res = requests.post(url_msg, json=payload_msg)
+        print(f"🔄 Enviando WhatsApp (Foto + Legenda) para: {chat_id}")
+        res = requests.post(url_file, json=payload_file)
         print(f"📥 Resposta da GREEN-API (Status {res.status_code}): {res.text}")
+
+        # Se houver falha no envio da imagem, envia apenas o texto
+        if res.status_code != 200:
+            url_msg = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendMessage/{GREEN_API_TOKEN}"
+            payload_msg = {
+                "chatId": chat_id,
+                "message": mensagem
+            }
+            res = requests.post(url_msg, json=payload_msg)
 
         if res.status_code == 200:
             print(f"🟢 Notificação enviada com sucesso para o WhatsApp: {nome_jogo} ({versao_jogo})")
@@ -243,7 +258,7 @@ def extrair_link_direto(url_alvo):
                 print("Tentando disparar download no evento do botão...")
                 for b in page.locator("a[href], button").all():
                     try:
-                        href = b.get_author("href") if hasattr(b, 'get_author') else b.get_attribute("href") or ""
+                        href = b.get_attribute("href") or ""
                         if "cdn-cgi" not in href and ("dl.modplays.com" in href or href.endswith(".apk")):
                             link_final = href
                             break
