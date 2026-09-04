@@ -20,15 +20,16 @@ GREEN_API_GROUP_ID = os.environ.get("GREEN_API_GROUP_ID")
 # SEU BLOG OFICIAL (PÁGINA INICIAL)
 PAGINA_INICIAL_BLOG = "https://k-404modapk.blogspot.com/?m=1"
 
-# FOTO OFICIAL DO SITE
+# LOGO REDONDA / FAVICON DO SEU SITE (SÓ VAI USAR ESSA FOTO)
 FOTO_OFICIAL_SITE = "https://k-404modapk.blogspot.com/favicon.ico"
 
 def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
-    """Envia mensagem no Telegram com a foto oficial do site."""
+    """Envia mensagem no Telegram com a foto oficial do site apontando para a página inicial."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠️ Telegram não configurado nos Secrets. Pulando notificação.")
         return
 
+    # Mensagem 100% profissional e sem menções a extração
     mensagem = (
         f"🔥 <b>JOGO ATUALIZADO!</b>\n\n"
         f"🎮 <b>Jogo:</b> {nome_jogo}\n"
@@ -37,6 +38,7 @@ def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
         f"⚡ <i>Nova versão disponível! Clique no link acima para fazer o download com segurança.</i>"
     )
 
+    # Envio para o Telegram utilizando SEMPRE a foto oficial do seu blog
     url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -48,7 +50,7 @@ def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
     try:
         res = requests.post(url_api, json=payload)
         if res.status_code != 200:
-            print(f"⚠️ Erro ao enviar foto no Telegram ({res.text}). Tentando texto...")
+            print(f"⚠️ Erro ao enviar foto ({res.text}). Tentando envio de mensagem...")
             url_api_msg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
             payload_msg = {
                 "chat_id": TELEGRAM_CHAT_ID,
@@ -59,14 +61,14 @@ def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
             res = requests.post(url_api_msg, json=payload_msg)
 
         if res.status_code == 200:
-            print(f"📢 Notificação enviada para o Telegram: {nome_jogo} ({versao_jogo})")
+            print(f"📢 Notificação enviada para o Telegram sobre: {nome_jogo} (Versão: {versao_jogo})")
         else:
             print(f"❌ Erro ao enviar Telegram: {res.text}")
     except Exception as e:
         print(f"❌ Erro na API do Telegram: {e}")
 
 def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
-    """Envia mensagem no WhatsApp via GREEN-API para o grupo/comunidade."""
+    """Envia mensagem no WhatsApp via GREEN-API para a comunidade."""
     if not GREEN_API_INSTANCE or not GREEN_API_TOKEN or not GREEN_API_GROUP_ID:
         print("⚠️ GREEN-API não configurada nos Secrets. Pulando WhatsApp.")
         return
@@ -123,7 +125,7 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
 
     nome_jogo = dados_jogo.get("nome", id_jogo.replace('-', ' ').title())
     versao_jogo = dados_jogo.get("versao", "Última Versão")
-    foto_url = FOTO_OFICIAL_SITE
+    foto_url = FOTO_OFICIAL_SITE  # Sempre salva a foto do seu blog
 
     # 1. Verifica se o link salvo no Firebase já é o mesmo
     link_atual = buscar_link_atual_firebase(id_jogo)
@@ -211,15 +213,18 @@ def extrair_link_direto(url_alvo):
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
 
-            # Extração de nome e versão
+            # --- EXTRAÇÃO DE NOME E VERSÃO DO JOGO ---
             try:
+                # Pega o título principal (H1) da página
                 h1_elem = page.locator("h1").first
                 full_title = h1_elem.inner_text().strip() if h1_elem.count() > 0 else page.title()
 
+                # Extrai versão usando expressão regular (ex: v0.4.7.7)
                 match_v = re.search(r'v?(\d+\.\d+[\.\d+]*)', full_title)
                 if match_v:
                     dados_jogo["versao"] = f"v{match_v.group(1)}"
 
+                # Limpa o título para deixar apenas o Nome do jogo
                 nome_limpo = full_title.split(" MOD")[0].split(" (")[0].split(" v")[0].strip()
                 if nome_limpo:
                     dados_jogo["nome"] = nome_limpo
@@ -245,7 +250,7 @@ def extrair_link_direto(url_alvo):
 
             if not link_final:
                 hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
-                for href:
+                for href in hrefs:
                     if "cdn-cgi" not in href and not href.startswith("blob:"):
                         if ("dl.modplays.com" in href or "files.modyolo.com" in href or href.endswith(".apk")):
                             if "play.google.com" not in href:
