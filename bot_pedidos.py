@@ -2,10 +2,13 @@ import os
 import time
 import requests
 
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "SEU_BOT_TOKEN")
-TELEGRAM_CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID", "@k404_modapk")
-DISCUSSION_GROUP_ID = os.environ.get("DISCUSSION_GROUP_ID", "-100XXXXXXXXXX") # ID do grupo de comentários
-ADMIN_USER_ID = int(os.environ.get("ADMIN_USER_ID", "123456789")) # Seu ID do Telegram para segurança
+# Puxa as chaves dos Secrets do GitHub
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHANNEL_ID = os.environ.get("TELEGRAM_CHAT_ID")
+DISCUSSION_GROUP_ID = os.environ.get("DISCUSSION_GROUP_ID")
+ADMIN_USER_ID_STR = os.environ.get("ADMIN_USER_ID")
+
+ADMIN_USER_ID = int(ADMIN_USER_ID_STR) if ADMIN_USER_ID_STR else 0
 
 TEXTO_ABERTA = (
     "🔥 <b>LISTA DE PEDIDOS ABERTA! (0/10)</b>\n"
@@ -28,14 +31,20 @@ def criar_texto_fechada(total):
 
 def enviar_telegram(endpoint, payload):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{endpoint}"
-    res = requests.post(url, json=payload)
-    return res.json()
+    try:
+        res = requests.post(url, json=payload)
+        return res.json()
+    except Exception as e:
+        print(f"❌ Erro na requisição do Telegram: {e}")
+        return {"ok": False}
 
 def main():
-    print("🤖 Bot de controle de pedidos K404 rodando e aguardando comando /pedidos_bot...")
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID or not DISCUSSION_GROUP_ID or not ADMIN_USER_ID:
+        print("❌ ERRO: Faltam variáveis nos Secrets do GitHub.")
+        return
+
+    print("🤖 Bot de pedidos do Canal K404 iniciado e escutando...")
     offset = 0
-    
-    # Estado da sessão de pedidos
     sessao_ativa = False
     message_id_canal = None
     usuarios_que_pediram = set()
@@ -52,47 +61,57 @@ def main():
             for update in resposta.get("result", []):
                 offset = update["update_id"] + 1
 
-                # Verifica se há mensagens
-                msg = update.get("message") or update.get("channel_post")
+                # Verifica se veio mensagem do canal ou do grupo
+                msg = update.get("message") or update.get("channel_post") or update.get("edited_channel_post")
                 if not msg:
                     continue
 
-                chat_id = msg["chat"]["id"]
-                user_id = msg.get("from", {}).get("id")
+                chat_id = str(msg.get("chat", {}).get("id"))
+                user = msg.get("from", {})
+                user_id = user.get("id") if user else None
                 texto_msg = msg.get("text", "")
 
-                # 1. ADMIN ABRE A LISTA COM /pedidos_bot
-                if texto_msg.strip() == "/pedidos_bot" and user_id == ADMIN_USER_ID and not sessao_ativa:
-                    print("🚀 Comando recebido! Abrindo lista no canal...")
-                    res = enviar_telegram("sendMessage", {
-                        "chat_id": TELEGRAM_CHANNEL_ID,
-                        "text": TEXTO_ABERTA,
-                        "parse_mode": "HTML"
-                    })
-                    
-                    if res.get("ok"):
-                        message_id_canal = res["result"]["message_id"]
-                        sessao_ativa = True
-                        usuarios_que_pediram.clear()
-                        print(f"✅ Lista aberta com sucesso! ID da mensagem: {message_id_canal}")
-                    else:
-                        print(f"❌ Erro ao abrir lista: {res}")
+                # Se a mensagem veio do canal principal
+                if chat_id == str(TELEGRAM_CHANNEL_ID):
+                    if texto_msg.strip() == "/pedidos_bot" and not sessao_ativa:
+                        print("🚀 Comando /pedidos_bot detectado no canal! Abrindo lista...")
+                        
+                        # Tenta apagar o comando que você mandou no canal para ficar limpo (opcional)
+                        msg_id_comando = msg.get("message_id")
+                        if msg_id_comando:
+                            enviar_telegram("deleteMessage", {
+                                "chat_id": TELEGRAM_CHANNEL_ID,
+                                "message_id": msg_id_comando
+                            })
 
-                # 2. CONTROLE DOS COMENTÁRIOS NO GRUPO ENQUANTO A LISTA ESTIVER ABERTA
-                elif sessao_ativa and str(chat_id) == str(DISCUSSION_GROUP_ID):
-                    # Ignora mensagens do próprio bot ou do admin se quiser, mas conta os membros
-                    if user_id == ADMIN_USER_ID:
+                        # Envia a mensagem de lista aberta
+                        res = enviar_telegram("sendMessage", {
+                            "chat_id": TELEGRAM_CHANNEL_ID,
+                            "text": TEXTO_ABERTA,
+                            "parse_mode": "HTML"
+                        })
+                        
+                        if res.get("ok"):
+                            message_id_canal = res["result"]["message_id"]
+                            sessao_ativa = True
+                            usuarios_que_pediram.clear()
+                            print(f"✅ Lista aberta com sucesso no canal! ID da mensagem: {message_id_canal}")
+                        else:
+                            print(f"❌ Erro ao enviar mensagem para o canal: {res}")
+
+                # Se a lista estiver aberta e a mensagem vier do GRUPO DE COMENTÁRIOS vinculado
+                elif sessao_ativa and chat_id == str(DISCUSSION_GROUP_ID):
+                    # Ignora se o admin mandar mensagem no grupo
+                    if user_id and user_id == ADMIN_USER_ID:
                         continue
 
-                    # Regra: 1 pedido por usuário
-                    if user_id not in usuarios_que_pediram:
+                    if user_id and user_id not in usuarios_que_pediram:
                         usuarios_que_pediram.add(user_id)
                         total_atual = len(usuarios_que_pediram)
-                        print(f"📥 Pedido recebido! Total: {total_atual}/10")
+                        print(f"📥 Pedido de usuário registrado! Total: {total_atual}/10")
 
-                        # Atualiza o contador na mensagem do canal em tempo real (opcional) ou verifica o limite
                         if total_atual >= 10:
-                            print("🔒 Limite de 10 atingido! Fechando lista automaticamente...")
+                            print("🔒 Limite de 10 atingido! Fechando lista no canal...")
                             enviar_telegram("editMessageText", {
                                 "chat_id": TELEGRAM_CHANNEL_ID,
                                 "message_id": message_id_canal,
@@ -100,10 +119,10 @@ def main():
                                 "parse_mode": "HTML"
                             })
                             sessao_ativa = False
-                            print("✅ Lista encerrada e fechada com sucesso via código.")
+                            print("✅ Lista encerrada com sucesso.")
 
         except Exception as e:
-            print(f"❌ Erro no loop do bot: {e}")
+            print(f"❌ Erro no loop: {e}")
             time.sleep(5)
 
 if __name__ == "__main__":
