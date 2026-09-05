@@ -2,18 +2,21 @@ name: Executar Robô de Download Automático
 
 on:
   schedule:
-    # Roda automaticamente a cada 2 horas
-    - cron: '0 */2 * * *'
+    # Roda automaticamente a cada 10 horas
+    - cron: '0 */10 * * *'
   workflow_dispatch:
     inputs:
       url_manual:
-        description: 'URL do jogo para testar (Modyolo ou Modplays)'
+        description: 'URL do jogo para testar/adicionar (Modyolo ou Modplays)'
         required: false
         default: ''
 
 jobs:
   extrair:
     runs-on: ubuntu-latest
+    # Permissão necessária para o bot do GitHub conseguir salvar/atualizar o jogos.txt
+    permissions:
+      contents: write
 
     steps:
       - name: Baixar codigo do repositorio
@@ -43,3 +46,11 @@ jobs:
           else
             python extrair.py
           fi
+
+      - name: Salvar lista de jogos no repositório
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add jogos.txt || true
+          git commit -m "Auto: Lista de jogos atualizada" || exit 0
+          git push
