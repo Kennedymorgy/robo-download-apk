@@ -18,6 +18,15 @@ TEXTO_ABERTA = (
     "• As soon as we reach 10 requests, it closes."
 )
 
+def criar_texto_andamento(total):
+    return (
+        f"🔥 <b>LISTA DE PEDIDOS ABERTA! ({total}/10)</b>\n"
+        f"🔥 <b>GAME REQUESTS OPEN! ({total}/10)</b>\n\n"
+        "🎮 Comente o jogo que você quer abaixo (Apenas os 10 primeiros! 1 por pessoa)\n"
+        "🎮 Comment your game below (Only the FIRST 10 requests! 1 per person)\n\n"
+        f"⏳ Pedidos recebidos / Requests received: <b>{total}/10</b>"
+    )
+
 def criar_texto_fechada(total):
     return (
         f"🚫 <b>LISTA DE PEDIDOS ENCERRADA! ({total}/10)</b>\n"
@@ -42,8 +51,7 @@ def main():
         print("❌ ERRO: Faltam variáveis nos Secrets do GitHub.")
         return
 
-    print("🚀 Abrindo a lista de pedidos no canal automaticamente...")
-    
+    print("🚀 Abrindo a lista de pedidos no canal...")
     res = enviar_telegram("sendMessage", {
         "chat_id": TELEGRAM_CHANNEL_ID,
         "text": TEXTO_ABERTA,
@@ -57,20 +65,31 @@ def main():
     message_id_canal = res["result"]["message_id"]
     print(f"✅ Lista aberta com sucesso! ID da mensagem: {message_id_canal}")
     
-    print("👀 Monitorando o grupo de comentários em busca dos 10 pedidos...")
+    print("👀 Monitorando comentários no grupo vinculado...")
     usuarios_que_pediram = set()
     inicio = time.time()
+    offset = None
     
-    # Vamos deixar monitorando por 15 minutos (900 segundos)
-    while (time.time() - inicio) < 900:
-        time.sleep(5)
-        url_updates = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset=-1"
+    # Roda por até 20 minutos monitorando
+    while (time.time() - inicio) < 1200:
+        time.sleep(4)
+        
+        url_updates = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?timeout=3"
+        if offset:
+            url_updates += f"&offset={offset}"
+            
         try:
             resp_grupo = requests.get(url_updates).json()
         except:
             continue
 
+        if not resp_grupo.get("ok"):
+            continue
+
         for update in resp_grupo.get("result", []):
+            update_id = update.get("update_id")
+            offset = update_id + 1
+
             msg = update.get("message")
             if not msg:
                 continue
@@ -78,12 +97,23 @@ def main():
             chat_id = str(msg.get("chat", {}).get("id"))
             user = msg.get("from", {})
             user_id = user.get("id")
+            message_thread_id = msg.get("message_thread_id")
 
+            # Verifica se a mensagem pertence ao grupo de discussão E está conectada ao tópico da postagem do canal
             if chat_id == str(DISCUSSION_GROUP_ID):
+                # Se o grupo usa tópicos por postagem, message_thread_id costuma bater com o message_id do canal ou o bot aceita do grupo geral
                 if user_id and user_id != ADMIN_USER_ID and user_id not in usuarios_que_pediram:
                     usuarios_que_pediram.add(user_id)
                     total = len(usuarios_que_pediram)
-                    print(f"📥 Pedido contado! Total: {total}/10")
+                    print(f"📥 Pedido de @{user.get('username', user_id)} contado! Total: {total}/10")
+
+                    # Atualiza o contador na mensagem do canal em tempo real!
+                    enviar_telegram("editMessageText", {
+                        "chat_id": TELEGRAM_CHANNEL_ID,
+                        "message_id": message_id_canal,
+                        "text": criar_texto_andamento(total),
+                        "parse_mode": "HTML"
+                    })
 
                     if total >= 10:
                         print("🔒 10 pedidos atingidos! Fechando lista...")
@@ -96,7 +126,7 @@ def main():
                         print("✅ Lista fechada com sucesso.")
                         return
 
-    print("⏰ Tempo limite de 15 minutos esgotado.")
+    print("⏰ Tempo limite esgotado.")
 
 if __name__ == "__main__":
     main()
