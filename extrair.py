@@ -17,6 +17,9 @@ GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE")
 GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN")
 GREEN_API_GROUP_ID = os.environ.get("GREEN_API_GROUP_ID")
 
+# URL DA SUA CLOUDFLARE WORKER (REDIRECIONADOR SEGURO)
+URL_WORKER = "https://orange-star-d066.claudiokennedymorgy.workers.dev"
+
 # SEU BLOG OFICIAL (PÁGINA INICIAL)
 PAGINA_INICIAL_BLOG = "https://k-404modapk.blogspot.com/?m=1"
 
@@ -135,7 +138,7 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
     link_atual = buscar_link_atual_firebase(id_jogo)
     if link_atual == link_novo:
         print(f"⏩ O link para '{id_jogo}' continua o mesmo. Nenhuma alteração feita no Firebase.")
-        return
+        return id_jogo
 
     print(f"🔄 Link novo detectado para '{id_jogo}'! Atualizando no Firebase...")
     firebase_base_url = "https://meublog-apks-default-rtdb.firebaseio.com"
@@ -156,6 +159,8 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
             enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo)
     except Exception as e:
         print(f"❌ Erro ao salvar no Firebase: {e}")
+    
+    return id_jogo
 
 def extrair_link_direto(url_alvo):
     print(f"Iniciando extração para: {url_alvo}")
@@ -283,7 +288,8 @@ if __name__ == "__main__":
         url_single = sys.argv[1]
         link, dados_jogo = extrair_link_direto(url_single)
         if link:
-            salvar_no_firebase_se_novo(url_single, link, dados_jogo)
-            print(f"LINK_ENCONTRADO:{link}")
+            id_jogo = salvar_no_firebase_se_novo(url_single, link, dados_jogo)
+            link_protegido = f"{URL_WORKER}?id={id_jogo}"
+            print(f"LINK_ENCONTRADO:{link_protegido}")
         else:
             print("Nenhum link direto encontrado.")
