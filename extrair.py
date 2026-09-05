@@ -299,13 +299,47 @@ def extrair_link_direto(url_alvo):
         browser.close()
         return link_final, dados_jogo
 
+def salvar_url_na_lista(url):
+    """Guarda a URL no arquivo jogos.txt para o robô monitorar sozinho depois."""
+    arquivo = "jogos.txt"
+    urls_existentes = set()
+    
+    if os.path.exists(arquivo):
+        with open(arquivo, "r", encoding="utf-8") as f:
+            urls_existentes = set(line.strip() for line in f if line.strip())
+
+    if url not in urls_existentes:
+        with open(arquivo, "a", encoding="utf-8") as f:
+            f.write(f"{url}\n")
+        print(f"📝 URL salva em {arquivo} para monitoramento automático.")
+
+def processar_jogo(url_alvo):
+    """Executa a verificação e atualização de um único jogo."""
+    print(f"\n==================================================")
+    link, dados_jogo = extrair_link_direto(url_alvo)
+    if link:
+        id_jogo = salvar_no_firebase_se_novo(url_alvo, link, dados_jogo)
+        salvar_url_na_lista(url_alvo)
+        link_protegido = f"{URL_WORKER}?id={id_jogo}"
+        print(f"LINK_ENCONTRADO:{link_protegido}")
+    else:
+        print(f"❌ Nenhum link direto encontrado para: {url_alvo}")
+
 if __name__ == "__main__":
+    # Caso 1: Execução manual passando URL
     if len(sys.argv) > 1 and sys.argv[1].startswith("http"):
         url_single = sys.argv[1]
-        link, dados_jogo = extrair_link_direto(url_single)
-        if link:
-            id_jogo = salvar_no_firebase_se_novo(url_single, link, dados_jogo)
-            link_protegido = f"{URL_WORKER}?id={id_jogo}"
-            print(f"LINK_ENCONTRADO:{link_protegido}")
+        processar_jogo(url_single)
+
+    # Caso 2: Execução automática (cron de 10 em 10 horas)
+    else:
+        arquivo_jogos = "jogos.txt"
+        if os.path.exists(arquivo_jogos):
+            with open(arquivo_jogos, "r", encoding="utf-8") as f:
+                lista_urls = [linha.strip() for linha in f if linha.strip()]
+            
+            print(f"🤖 Rodando em modo automático. {len(lista_urls)} jogo(s) para verificar...")
+            for url in lista_urls:
+                processar_jogo(url)
         else:
-            print("Nenhum link direto encontrado.")
+            print("⚠️ Nenhuma URL cadastrada no 'jogos.txt'. Adicione uma URL manualmente primeiro.")
