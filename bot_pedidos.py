@@ -38,23 +38,27 @@ def enviar_telegram(endpoint, payload):
         return {"ok": False}
 
 def main():
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID or not DISCUSSION_GROUP_ID or not ADMIN_USER_ID:
-        print("❌ ERRO: Faltam variáveis nos Secrets.")
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
+        print("❌ ERRO: Faltam variáveis nos Secrets do GitHub.")
         return
 
-    print("🤖 Verificando comandos no canal K404...")
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?timeout=10"
-    resposta = requests.get(url).json()
+    print("🤖 Conectando com a API do Telegram...")
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset=-1"
+    
+    try:
+        resposta = requests.get(url).json()
+    except Exception as e:
+        print(f"❌ Erro de conexão: {e}")
+        return
 
     if not resposta.get("ok"):
-        print("❌ Erro ao buscar atualizações do Telegram.")
+        print(f"❌ Erro retornado pelo Telegram (Token inválido ou sem acesso): {resposta}")
         return
 
     sessao_aberta = False
     message_id_canal = None
     usuarios_que_pediram = set()
 
-    # 1. Procura se você mandou /pedidos_bot recentemente no canal
     for update in resposta.get("result", []):
         msg = update.get("channel_post") or update.get("message")
         if not msg:
@@ -63,16 +67,16 @@ def main():
         chat_id = str(msg.get("chat", {}).get("id"))
         texto_msg = msg.get("text", "")
 
+        print(f"🔎 Mensagem lida no chat {chat_id}: {texto_msg}")
+
         if chat_id == str(TELEGRAM_CHANNEL_ID) and texto_msg.strip() == "/pedidos_bot":
-            print("🚀 Comando /pedidos_bot encontrado no canal! Abrindo lista...")
+            print("🚀 Comando /pedidos_bot encontrado! Abrindo lista...")
             
-            # Apaga o seu comando do canal
             enviar_telegram("deleteMessage", {
                 "chat_id": TELEGRAM_CHANNEL_ID,
                 "message_id": msg.get("message_id")
             })
 
-            # Envia a mensagem de lista aberta
             res = enviar_telegram("sendMessage", {
                 "chat_id": TELEGRAM_CHANNEL_ID,
                 "text": TEXTO_ABERTA,
@@ -83,21 +87,25 @@ def main():
                 message_id_canal = res["result"]["message_id"]
                 sessao_aberta = True
                 print(f"✅ Lista aberta com sucesso! ID: {message_id_canal}")
+            else:
+                print(f"❌ Erro do Telegram ao enviar mensagem: {res}")
             break
 
     if not sessao_aberta:
-        print("ℹ️ Nenhum comando /pedidos_bot novo encontrado no canal. Finalizando script.")
+        print("ℹ️ Nenhuma mensagem nova '/pedidos_bot' encontrada nas últimas atualizações do canal.")
+        print("Dica: Envie o comando '/pedidos_bot' no canal AGORA e rode o workflow em seguida.")
         return
 
-    # 2. Se abriu a lista, fica monitorando os comentários por alguns minutos até fechar os 10
     print("👀 Monitorando o grupo de comentários...")
     inicio = time.time()
     
-    # Roda por até 10 minutos recolhendo os pedidos do grupo
     while (time.time() - inicio) < 600:
         time.sleep(5)
-        url_updates = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?timeout=5"
-        resp_grupo = requests.get(url_updates).json()
+        url_updates = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset=-1"
+        try:
+            resp_grupo = requests.get(url_updates).json()
+        except:
+            continue
 
         for update in resp_grupo.get("result", []):
             msg = update.get("message")
@@ -108,7 +116,6 @@ def main():
             user = msg.get("from", {})
             user_id = user.get("id")
 
-            # Se a mensagem veio do grupo de comentários
             if chat_id == str(DISCUSSION_GROUP_ID):
                 if user_id and user_id != ADMIN_USER_ID and user_id not in usuarios_que_pediram:
                     usuarios_que_pediram.add(user_id)
@@ -123,10 +130,8 @@ def main():
                             "text": criar_texto_fechada(total),
                             "parse_mode": "HTML"
                         })
-                        print("✅ Lista fechada com sucesso. Script finalizado.")
+                        print("✅ Lista fechada com sucesso.")
                         return
-
-    print("⏰ Tempo limite de monitoramento esgotado.")
 
 if __name__ == "__main__":
     main()
