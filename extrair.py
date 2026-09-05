@@ -17,13 +17,11 @@ GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE")
 GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN")
 GREEN_API_GROUP_ID = os.environ.get("GREEN_API_GROUP_ID")
 
-# URL DA SUA CLOUDFLARE WORKER (REDIRECIONADOR SEGURO)
+# URL DA SUA CLOUDFLARE WORKER
 URL_WORKER = "https://orange-star-d066.claudiokennedymorgy.workers.dev"
 
-# SEU BLOG OFICIAL (PÁGINA INICIAL)
+# SEU BLOG OFICIAL
 PAGINA_INICIAL_BLOG = "https://k-404modapk.blogspot.com/?m=1"
-
-# FOTO OFICIAL DO SITE
 FOTO_OFICIAL_SITE = "https://k-404modapk.blogspot.com/favicon.ico"
 
 def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
@@ -37,7 +35,7 @@ def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
         f"🎮 <b>Jogo:</b> {nome_jogo}\n"
         f"📦 <b>Versão:</b> {versao_jogo}\n"
         f"🔗 <b>Página:</b> <a href='{PAGINA_INICIAL_BLOG}'>Baixar no Blog</a>\n\n"
-        f"⚡ <i>Nova versão disponível! Clique no link acima para fazer o download com segurança.</i>"
+        f"⚡ <i>Nova versão disponível no servidor! Atualize os dados no Blogger se necessário.</i>"
     )
 
     url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
@@ -82,7 +80,7 @@ def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
         f"🎮 *Jogo:* {nome_jogo}\n"
         f"📦 *Versão:* {versao_jogo}\n"
         f"🔗 *Página:* {PAGINA_INICIAL_BLOG}\n\n"
-        f"⚡ _Nova versão disponível! Clique no link acima para fazer o download com segurança._"
+        f"⚡ _Nova versão disponível no servidor! Atualize os dados no Blogger se necessário._"
     )
 
     url_file = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendFileByUrl/{GREEN_API_TOKEN}"
@@ -96,7 +94,6 @@ def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
     try:
         print(f"🔄 Enviando WhatsApp (Foto + Legenda) para: {chat_id}")
         res = requests.post(url_file, json=payload_file)
-        print(f"📥 Resposta da GREEN-API (Status {res.status_code}): {res.text}")
 
         if res.status_code != 200:
             print("⚠️ Falha no envio de arquivo. Tentando enviar como texto simples...")
@@ -110,19 +107,20 @@ def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
         if res.status_code == 200:
             print(f"🟢 Notificação enviada com sucesso para o WhatsApp: {nome_jogo} ({versao_jogo})")
         else:
-            print(f"❌ Falha ao enviar WhatsApp. Verifique se a instância e o Token estão corretos no GitHub.")
+            print(f"❌ Falha ao enviar WhatsApp. Verifique as credenciais no GitHub.")
     except Exception as e:
         print(f"❌ Erro crítico na API do WhatsApp: {e}")
 
-def buscar_link_atual_firebase(id_jogo):
+def buscar_dados_atuais_firebase(id_jogo):
+    """Consulta os dados atuais salvos no Firebase."""
     firebase_base_url = "https://meublog-apks-default-rtdb.firebaseio.com"
     try:
-        res = requests.get(f"{firebase_base_url}/links/{id_jogo}/link_direto.json")
+        res = requests.get(f"{firebase_base_url}/links/{id_jogo}.json")
         if res.status_code == 200 and res.text != 'null':
             return res.json()
     except Exception as e:
         print(f"Erro ao consultar Firebase: {e}")
-    return None
+    return {}
 
 def extrair_id_jogo(url_origem):
     """Extrai o ID correto do jogo ignorando sufixos como /download/, /0/, /1/, .html, etc."""
@@ -149,12 +147,16 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
     versao_jogo = dados_jogo.get("versao", "Última Versão")
     foto_url = FOTO_OFICIAL_SITE
 
-    link_atual = buscar_link_atual_firebase(id_jogo)
-    if link_atual == link_novo:
-        print(f"⏩ O link para '{id_jogo}' continua o mesmo. Nenhuma alteração feita no Firebase.")
+    dados_atuais = buscar_dados_atuais_firebase(id_jogo)
+    link_atual = dados_atuais.get("link_direto") if isinstance(dados_atuais, dict) else None
+    versao_atual = dados_atuais.get("versao") if isinstance(dados_atuais, dict) else None
+
+    # Compara se o link ou a versão mudaram
+    if link_atual == link_novo and versao_atual == versao_jogo:
+        print(f"⏩ O jogo '{id_jogo}' continua com o mesmo link ({versao_jogo}). Nenhuma notificação enviada.")
         return id_jogo
 
-    print(f"🔄 Link novo detectado para '{id_jogo}'! Atualizando no Firebase...")
+    print(f"🔄 Nova versão/link detectado para '{id_jogo}'! Atualizando no Firebase...")
     firebase_base_url = "https://meublog-apks-default-rtdb.firebaseio.com"
     payload = {
         "url_original": url_origem,
@@ -168,7 +170,7 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
         res1 = requests.patch(f"{firebase_base_url}/links/{id_jogo}.json", json=payload)
         res2 = requests.patch(f"{firebase_base_url}/jogos/{id_jogo}.json", json=payload)
         if res1.status_code == 200:
-            print(f"✅ Link atualizado com sucesso no Firebase para: {id_jogo}")
+            print(f"✅ Link e versão atualizados no Firebase para: {id_jogo}")
             enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo)
             enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo)
     except Exception as e:
