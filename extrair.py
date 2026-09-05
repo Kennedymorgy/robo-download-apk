@@ -85,7 +85,6 @@ def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
         f"⚡ _Nova versão disponível! Clique no link acima para fazer o download com segurança._"
     )
 
-    # Tentativa com imagem usando sendFileByUrl
     url_file = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendFileByUrl/{GREEN_API_TOKEN}"
     payload_file = {
         "chatId": chat_id,
@@ -99,7 +98,6 @@ def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
         res = requests.post(url_file, json=payload_file)
         print(f"📥 Resposta da GREEN-API (Status {res.status_code}): {res.text}")
 
-        # Se falhar o envio com foto, faz fallback enviando apenas a mensagem de texto
         if res.status_code != 200:
             print("⚠️ Falha no envio de arquivo. Tentando enviar como texto simples...")
             url_msg = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendMessage/{GREEN_API_TOKEN}"
@@ -126,10 +124,26 @@ def buscar_link_atual_firebase(id_jogo):
         print(f"Erro ao consultar Firebase: {e}")
     return None
 
+def extrair_id_jogo(url_origem):
+    """Extrai o ID correto do jogo ignorando sufixos como /download/, /0/, /1/, .html, etc."""
+    url_limpa = url_origem.split(']')[0].rstrip('/')
+    partes = url_limpa.split('/')
+    
+    partes_filtradas = [
+        p for p in partes 
+        if p and p not in ['download', 'file'] and not p.isdigit()
+    ]
+    
+    if partes_filtradas:
+        id_jogo = partes_filtradas[-1]
+    else:
+        id_jogo = "jogo"
+        
+    id_jogo = id_jogo.replace('.html', '').replace('.apk', '')
+    return id_jogo
+
 def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
-    partes = url_origem.rstrip('/').split('/')
-    id_jogo = partes[-2] if len(partes) >= 2 else "jogo"
-    id_jogo = id_jogo.replace('.html', '').replace('.a', '')
+    id_jogo = extrair_id_jogo(url_origem)
 
     nome_jogo = dados_jogo.get("nome", id_jogo.replace('-', ' ').title())
     versao_jogo = dados_jogo.get("versao", "Última Versão")
