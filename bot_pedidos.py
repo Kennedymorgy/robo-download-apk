@@ -42,6 +42,9 @@ def main():
         print("❌ ERRO: Faltam variáveis nos Secrets do GitHub.")
         return
 
+    print("🔌 Removendo webhook ativo para liberar o getUpdates...")
+    requests.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteWebhook?drop_pending_updates=false")
+
     print("🤖 Conectando com a API do Telegram...")
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset=-1"
     
@@ -52,7 +55,7 @@ def main():
         return
 
     if not resposta.get("ok"):
-        print(f"❌ Erro retornado pelo Telegram (Token inválido ou sem acesso): {resposta}")
+        print(f"❌ Erro retornado pelo Telegram: {resposta}")
         return
 
     sessao_aberta = False
@@ -66,8 +69,6 @@ def main():
 
         chat_id = str(msg.get("chat", {}).get("id"))
         texto_msg = msg.get("text", "")
-
-        print(f"🔎 Mensagem lida no chat {chat_id}: {texto_msg}")
 
         if chat_id == str(TELEGRAM_CHANNEL_ID) and texto_msg.strip() == "/pedidos_bot":
             print("🚀 Comando /pedidos_bot encontrado! Abrindo lista...")
@@ -87,13 +88,10 @@ def main():
                 message_id_canal = res["result"]["message_id"]
                 sessao_aberta = True
                 print(f"✅ Lista aberta com sucesso! ID: {message_id_canal}")
-            else:
-                print(f"❌ Erro do Telegram ao enviar mensagem: {res}")
             break
 
     if not sessao_aberta:
-        print("ℹ️ Nenhuma mensagem nova '/pedidos_bot' encontrada nas últimas atualizações do canal.")
-        print("Dica: Envie o comando '/pedidos_bot' no canal AGORA e rode o workflow em seguida.")
+        print("ℹ️ Nenhuma mensagem nova '/pedidos_bot' encontrada no canal.")
         return
 
     print("👀 Monitorando o grupo de comentários...")
