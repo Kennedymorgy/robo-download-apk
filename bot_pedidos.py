@@ -42,62 +42,27 @@ def main():
         print("❌ ERRO: Faltam variáveis nos Secrets do GitHub.")
         return
 
-    print("🔌 Removendo webhook ativo para liberar o getUpdates...")
-    requests.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteWebhook?drop_pending_updates=false")
-
-    print("🤖 Conectando com a API do Telegram...")
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset=-1"
+    print("🚀 Abrindo a lista de pedidos no canal automaticamente...")
     
-    try:
-        resposta = requests.get(url).json()
-    except Exception as e:
-        print(f"❌ Erro de conexão: {e}")
+    res = enviar_telegram("sendMessage", {
+        "chat_id": TELEGRAM_CHANNEL_ID,
+        "text": TEXTO_ABERTA,
+        "parse_mode": "HTML"
+    })
+
+    if not res.get("ok"):
+        print(f"❌ Erro ao enviar mensagem no canal: {res}")
         return
 
-    if not resposta.get("ok"):
-        print(f"❌ Erro retornado pelo Telegram: {resposta}")
-        return
-
-    sessao_aberta = False
-    message_id_canal = None
+    message_id_canal = res["result"]["message_id"]
+    print(f"✅ Lista aberta com sucesso! ID da mensagem: {message_id_canal}")
+    
+    print("👀 Monitorando o grupo de comentários em busca dos 10 pedidos...")
     usuarios_que_pediram = set()
-
-    for update in resposta.get("result", []):
-        msg = update.get("channel_post") or update.get("message")
-        if not msg:
-            continue
-
-        chat_id = str(msg.get("chat", {}).get("id"))
-        texto_msg = msg.get("text", "")
-
-        if chat_id == str(TELEGRAM_CHANNEL_ID) and texto_msg.strip() == "/pedidos_bot":
-            print("🚀 Comando /pedidos_bot encontrado! Abrindo lista...")
-            
-            enviar_telegram("deleteMessage", {
-                "chat_id": TELEGRAM_CHANNEL_ID,
-                "message_id": msg.get("message_id")
-            })
-
-            res = enviar_telegram("sendMessage", {
-                "chat_id": TELEGRAM_CHANNEL_ID,
-                "text": TEXTO_ABERTA,
-                "parse_mode": "HTML"
-            })
-
-            if res.get("ok"):
-                message_id_canal = res["result"]["message_id"]
-                sessao_aberta = True
-                print(f"✅ Lista aberta com sucesso! ID: {message_id_canal}")
-            break
-
-    if not sessao_aberta:
-        print("ℹ️ Nenhuma mensagem nova '/pedidos_bot' encontrada no canal.")
-        return
-
-    print("👀 Monitorando o grupo de comentários...")
     inicio = time.time()
     
-    while (time.time() - inicio) < 600:
+    # Vamos deixar monitorando por 15 minutos (900 segundos)
+    while (time.time() - inicio) < 900:
         time.sleep(5)
         url_updates = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset=-1"
         try:
@@ -130,6 +95,8 @@ def main():
                         })
                         print("✅ Lista fechada com sucesso.")
                         return
+
+    print("⏰ Tempo limite de 15 minutos esgotado.")
 
 if __name__ == "__main__":
     main()
