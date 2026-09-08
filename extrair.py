@@ -221,7 +221,8 @@ def extrair_link_direto(url_alvo):
             nonlocal link_final
             url = request.url
             if "cdn-cgi" not in url and "challenge-platform" not in url and not url.startswith("blob:"):
-                if ("dl.modplays.com" in url or "files.modyolo.com" in url or ".apk" in url):
+                # Aceita Modplays, Modyolo (qualquer servidor files) e links .apk
+                if ("dl.modplays.com" in url or "modyolo.com" in url or ".apk" in url):
                     if "play.google.com" not in url:
                         if url.endswith(".apk") or "download" in url or "file" in url:
                             link_final = url
@@ -236,17 +237,43 @@ def extrair_link_direto(url_alvo):
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
 
+            # --- EXTRAÇÃO INTELIGENTE DE NOME E VERSÃO (CORRIGIDO PARA MODYOLO E MODPLAYS) ---
             try:
-                h1_elem = page.locator("h1").first
-                full_title = h1_elem.inner_text().strip() if h1_elem.count() > 0 else page.title()
+                full_title = ""
+                
+                # 1. Tenta pegar a Meta Tag Social (og:title) que ignora logos do topo
+                og_elem = page.locator('meta[property="og:title"]').first
+                if og_elem.count() > 0:
+                    full_title = og_elem.get_attribute("content") or ""
 
-                match_v = re.search(r'v?(\d+\.\d+[\.\d+]*)', full_title)
+                # 2. Se não achar, procura H1 ignorando textos de logos
+                if not full_title:
+                    for h1 in page.locator("h1").all():
+                        txt = h1.inner_text().strip()
+                        if txt and "modyolo" not in txt.lower() and "modplays" not in txt.lower():
+                            full_title = txt
+                            break
+
+                # 3. Fallback para a tag <title>
+                if not full_title:
+                    full_title = page.title()
+
+                # Busca a versão no texto (ex: v1.2.3 ou 1.2.3)
+                match_v = re.search(r'(?:v|ver|version)?\s*(\d+\.\d+(?:\.\d+)*)', full_title, re.IGNORECASE)
                 if match_v:
                     dados_jogo["versao"] = f"v{match_v.group(1)}"
 
-                nome_limpo = full_title.split(" MOD")[0].split(" (")[0].split(" v")[0].strip()
-                if nome_limpo:
+                # Limpa o título para pegar apenas o Nome do Jogo
+                nome_limpo = re.split(r'\s+(?:MOD|v?\d+\.\d+|\(|-|–|Download|APK)', full_title, flags=re.IGNORECASE)[0].strip()
+                nome_limpo = re.sub(r'modyolo\.com|modplays\.com|modyolo|modplays', '', nome_limpo, flags=re.IGNORECASE).strip()
+
+                if nome_limpo and len(nome_limpo) > 1:
                     dados_jogo["nome"] = nome_limpo
+                else:
+                    # Se o nome falhar, gera um nome limpo baseado na URL
+                    id_limpo = extrair_id_jogo(url_alvo)
+                    id_sem_numero = re.sub(r'-\d+$', '', id_limpo)
+                    dados_jogo["nome"] = id_sem_numero.replace('-', ' ').title()
 
             except Exception as err_meta:
                 print(f"⚠️ Erro ao extrair metadados da página: {err_meta}")
@@ -271,7 +298,7 @@ def extrair_link_direto(url_alvo):
                 hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
                 for href in hrefs:
                     if "cdn-cgi" not in href and not href.startswith("blob:"):
-                        if ("dl.modplays.com" in href or "files.modyolo.com" in href or href.endswith(".apk")):
+                        if ("dl.modplays.com" in href or "modyolo.com" in href or href.endswith(".apk")):
                             if "play.google.com" not in href:
                                 link_final = href
                                 break
@@ -281,7 +308,7 @@ def extrair_link_direto(url_alvo):
                 for b in page.locator("a[href], button").all():
                     try:
                         href = b.get_attribute("href") or ""
-                        if "cdn-cgi" not in href and ("dl.modplays.com" in href or href.endswith(".apk")):
+                        if "cdn-cgi" not in href and ("dl.modplays.com" in href or "modyolo" in href or href.endswith(".apk")):
                             link_final = href
                             break
                         elif "download" in (b.inner_text() or "").lower():
