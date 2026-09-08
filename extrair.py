@@ -179,7 +179,9 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
     return id_jogo
 
 def extrair_link_direto(url_alvo):
-    print(f"Iniciando extração para: {url_alvo}")
+    # Remove sufixos de subpágina (/download, /download/0, etc.) para forçar a navegação na página do post principal
+    url_post = re.sub(r'/download(?:/\d+)?/?$', '', url_alvo.rstrip('/'))
+    print(f"Iniciando extração para: {url_post}")
 
     dados_jogo = {
         "nome": "Jogo Desconhecido",
@@ -221,7 +223,6 @@ def extrair_link_direto(url_alvo):
             nonlocal link_final
             url = request.url
 
-            # BLOQUEIO DE TRACKERS/ANALYTICS (Yandex, Google, Facebook, etc.)
             ignorar_dominios = [
                 "yandex", "mc.yandex", "google-analytics", "googletagmanager", 
                 "facebook", "doubleclick", "cdn-cgi", "challenge-platform"
@@ -230,20 +231,17 @@ def extrair_link_direto(url_alvo):
                 return
 
             if not url.startswith("blob:") and "play.google.com" not in url:
-                # 1. Links diretos do Modplays
                 if "dl.modplays.com" in url:
                     link_final = url
-                # 2. Servidores reais do Modyolo (files, files-2, etc.)
                 elif "files" in url and "modyolo" in url:
                     link_final = url
-                # 3. Links diretos terminando em .apk
                 elif url.endswith(".apk") or ".apk?" in url:
                     link_final = url
 
         page.on("request", interceptar_requisicao)
 
         try:
-            page.goto(url_alvo, wait_until="domcontentloaded", timeout=60000)
+            page.goto(url_post, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(4000)
 
             if "cloudflare" in page.content().lower() or "just a moment" in page.title().lower():
@@ -267,13 +265,18 @@ def extrair_link_direto(url_alvo):
                 if not full_title:
                     full_title = page.title()
 
-                # Busca versão no título principal
+                # 1. Busca versão no título (ex: v5.4.0)
                 match_v = re.search(r'(?:v|ver|version)?\s*(\d+\.\d+(?:\.\d+)*)', full_title, re.IGNORECASE)
-                
-                # Busca secundária no HTML caso não ache no título
+
+                # 2. Busca na tabela do HTML se não encontrar no título
                 if not match_v:
-                    texto_pagina = page.content()
-                    match_v = re.search(r'(?:version|versão|ver)\s*:?\s*v?(\d+\.\d+(?:\.\d+)*)', texto_pagina, re.IGNORECASE)
+                    html_content = page.content()
+                    match_v = re.search(r'(?:Version|Versão)\s*</[^>]+>\s*<[^>]+>\s*(\d+\.\d+(?:\.\d+)*)', html_content, re.IGNORECASE)
+
+                # 3. Busca genérica no texto do HTML
+                if not match_v:
+                    html_content = page.content()
+                    match_v = re.search(r'(?:version|versão|ver)\s*:?\s*v?(\d+\.\d+(?:\.\d+)*)', html_content, re.IGNORECASE)
 
                 if match_v:
                     num_versao = match_v.group(1).strip()
@@ -287,7 +290,7 @@ def extrair_link_direto(url_alvo):
                 if nome_limpo and len(nome_limpo) > 1:
                     dados_jogo["nome"] = nome_limpo
                 else:
-                    id_limpo = extrair_id_jogo(url_alvo)
+                    id_limpo = extrair_id_jogo(url_post)
                     id_sem_numero = re.sub(r'-\d+$', '', id_limpo)
                     dados_jogo["nome"] = id_sem_numero.replace('-', ' ').title()
 
@@ -310,9 +313,8 @@ def extrair_link_direto(url_alvo):
             print("Aguardando carregamento da página de download...")
             page.wait_for_timeout(10000)
 
-            # Se o Modyolo redirecionou para a subpágina /download/, clica no botão final de download
-            if "download" in page.url and "modyolo.com" in page.url and not link_final:
-                print("Detectada página intermediária do Modyolo, clicando no link direto final...")
+            if "download" in page.url and not link_final:
+                print("Detectada página intermediária, clicando no link direto final...")
                 for b in page.locator("a[href]").all():
                     try:
                         href = b.get_attribute("href") or ""
@@ -326,7 +328,6 @@ def extrair_link_direto(url_alvo):
                     except:
                         continue
 
-            # Varredura final no DOM se o link não foi pego na requisição
             if not link_final:
                 hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
                 for href in hrefs:
