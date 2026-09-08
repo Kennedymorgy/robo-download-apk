@@ -220,12 +220,25 @@ def extrair_link_direto(url_alvo):
         def interceptar_requisicao(request):
             nonlocal link_final
             url = request.url
-            if "cdn-cgi" not in url and "challenge-platform" not in url and not url.startswith("blob:"):
-                # Aceita Modplays, Modyolo (qualquer servidor files) e links .apk
-                if ("dl.modplays.com" in url or "modyolo.com" in url or ".apk" in url):
-                    if "play.google.com" not in url:
-                        if url.endswith(".apk") or "download" in url or "file" in url:
-                            link_final = url
+
+            # BLOQUEIO DE TRACKERS/ANALYTICS (Yandex, Google, Facebook, etc.)
+            ignorar_dominios = [
+                "yandex", "mc.yandex", "google-analytics", "googletagmanager", 
+                "facebook", "doubleclick", "cdn-cgi", "challenge-platform"
+            ]
+            if any(dom in url for dom in ignorar_dominios):
+                return
+
+            if not url.startswith("blob:") and "play.google.com" not in url:
+                # 1. Links diretos do Modplays
+                if "dl.modplays.com" in url:
+                    link_final = url
+                # 2. Servidores reais do Modyolo (files, files-2, etc.)
+                elif "files" in url and "modyolo" in url:
+                    link_final = url
+                # 3. Links diretos terminando em .apk
+                elif url.endswith(".apk") or ".apk?" in url:
+                    link_final = url
 
         page.on("request", interceptar_requisicao)
 
@@ -237,16 +250,13 @@ def extrair_link_direto(url_alvo):
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
 
-            # --- EXTRAÇÃO INTELIGENTE DE NOME E VERSÃO (CORRIGIDO PARA MODYOLO E MODPLAYS) ---
+            # EXTRAÇÃO DE NOME E VERSÃO
             try:
                 full_title = ""
-                
-                # 1. Tenta pegar a Meta Tag Social (og:title) que ignora logos do topo
                 og_elem = page.locator('meta[property="og:title"]').first
                 if og_elem.count() > 0:
                     full_title = og_elem.get_attribute("content") or ""
 
-                # 2. Se não achar, procura H1 ignorando textos de logos
                 if not full_title:
                     for h1 in page.locator("h1").all():
                         txt = h1.inner_text().strip()
@@ -254,23 +264,19 @@ def extrair_link_direto(url_alvo):
                             full_title = txt
                             break
 
-                # 3. Fallback para a tag <title>
                 if not full_title:
                     full_title = page.title()
 
-                # Busca a versão no texto (ex: v1.2.3 ou 1.2.3)
                 match_v = re.search(r'(?:v|ver|version)?\s*(\d+\.\d+(?:\.\d+)*)', full_title, re.IGNORECASE)
                 if match_v:
                     dados_jogo["versao"] = f"v{match_v.group(1)}"
 
-                # Limpa o título para pegar apenas o Nome do Jogo
                 nome_limpo = re.split(r'\s+(?:MOD|v?\d+\.\d+|\(|-|–|Download|APK)', full_title, flags=re.IGNORECASE)[0].strip()
                 nome_limpo = re.sub(r'modyolo\.com|modplays\.com|modyolo|modplays', '', nome_limpo, flags=re.IGNORECASE).strip()
 
                 if nome_limpo and len(nome_limpo) > 1:
                     dados_jogo["nome"] = nome_limpo
                 else:
-                    # Se o nome falhar, gera um nome limpo baseado na URL
                     id_limpo = extrair_id_jogo(url_alvo)
                     id_sem_numero = re.sub(r'-\d+$', '', id_limpo)
                     dados_jogo["nome"] = id_sem_numero.replace('-', ' ').title()
@@ -291,34 +297,33 @@ def extrair_link_direto(url_alvo):
                 except:
                     continue
 
-            print("Aguardando 16s pelo timer do Modplays...")
-            page.wait_for_timeout(16000)
+            print("Aguardando carregamento da página de download...")
+            page.wait_for_timeout(10000)
 
-            if not link_final:
-                hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
-                for href in hrefs:
-                    if "cdn-cgi" not in href and not href.startswith("blob:"):
-                        if ("dl.modplays.com" in href or "modyolo.com" in href or href.endswith(".apk")):
-                            if "play.google.com" not in href:
-                                link_final = href
-                                break
-
-            if not link_final:
-                print("Tentando disparar download no evento do botão...")
-                for b in page.locator("a[href], button").all():
+            # Se o Modyolo redirecionou para a subpágina /download/, clica no botão final de download
+            if "download" in page.url and "modyolo.com" in page.url and not link_final:
+                print("Detectada página intermediária do Modyolo, clicando no link direto final...")
+                for b in page.locator("a[href]").all():
                     try:
                         href = b.get_attribute("href") or ""
-                        if "cdn-cgi" not in href and ("dl.modplays.com" in href or "modyolo" in href or href.endswith(".apk")):
+                        if ("files" in href and "modyolo" in href) or href.endswith(".apk") or "dl.modplays.com" in href:
                             link_final = href
                             break
-                        elif "download" in (b.inner_text() or "").lower():
-                            with page.expect_download(timeout=5000) as download_info:
-                                b.click(force=True)
-                            download = download_info.value
-                            link_final = download.url
+                        elif "download" in (b.inner_text() or "").lower() and "yandex" not in href:
+                            b.click(force=True, timeout=3000)
+                            page.wait_for_timeout(5000)
                             break
                     except:
                         continue
+
+            # Varredura final no DOM se o link não foi pego na requisição
+            if not link_final:
+                hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
+                for href in hrefs:
+                    if "yandex" not in href and "cdn-cgi" not in href and not href.startswith("blob:"):
+                        if "dl.modplays.com" in href or ("files" in href and "modyolo" in href) or href.endswith(".apk"):
+                            link_final = href
+                            break
 
         except Exception as e:
             print(f"Erro na navegação: {e}")
@@ -353,12 +358,9 @@ def processar_jogo(url_alvo):
         print(f"❌ Nenhum link direto encontrado para: {url_alvo}")
 
 if __name__ == "__main__":
-    # Caso 1: Execução manual passando URL
     if len(sys.argv) > 1 and sys.argv[1].startswith("http"):
         url_single = sys.argv[1]
         processar_jogo(url_single)
-
-    # Caso 2: Execução automática (cron de 10 em 10 horas)
     else:
         arquivo_jogos = "jogos.txt"
         if os.path.exists(arquivo_jogos):
