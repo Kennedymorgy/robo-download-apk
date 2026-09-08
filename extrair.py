@@ -221,7 +221,6 @@ def extrair_link_direto(url_alvo):
             nonlocal link_final
             url = request.url
 
-            # BLOQUEIO DE TRACKERS/ANALYTICS (Yandex, Google, Facebook, etc.)
             ignorar_dominios = [
                 "yandex", "mc.yandex", "google-analytics", "googletagmanager", 
                 "facebook", "doubleclick", "cdn-cgi", "challenge-platform"
@@ -230,13 +229,10 @@ def extrair_link_direto(url_alvo):
                 return
 
             if not url.startswith("blob:") and "play.google.com" not in url:
-                # 1. Links diretos do Modplays
                 if "dl.modplays.com" in url:
                     link_final = url
-                # 2. Servidores reais do Modyolo (files, files-2, etc.)
                 elif "files" in url and "modyolo" in url:
                     link_final = url
-                # 3. Links diretos terminando em .apk
                 elif url.endswith(".apk") or ".apk?" in url:
                     link_final = url
 
@@ -250,7 +246,7 @@ def extrair_link_direto(url_alvo):
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
 
-            # EXTRAÇÃO DE NOME E VERSÃO BLINDADA
+            # EXTRAÇÃO DE NOME E VERSÃO BLINDADA (100% PRECISA)
             try:
                 full_title = ""
                 og_elem = page.locator('meta[property="og:title"]').first
@@ -267,27 +263,40 @@ def extrair_link_direto(url_alvo):
                 if not full_title:
                     full_title = page.title()
 
-                match_v = None
+                num_versao = None
 
-                # 1. Busca versão no título principal (ex: FRAG Pro Shooter v5.4.0)
+                # 1. Prioridade no Título Principal (Procura no og:title/H1 por versões como v5.4.0 ou 5.4.0)
                 if full_title:
-                    match_v = re.search(r'(?:v|ver|version)\s*(\d+\.\d+(?:\.\d+)*)', full_title, re.IGNORECASE)
+                    match_3dig = re.search(r'\bv?(\d+\.\d+\.\d+)\b', full_title)
+                    match_v = re.search(r'\bv(\d+\.\d+(?:\.\d+)*)\b', full_title, re.IGNORECASE)
+                    
+                    if match_3dig:
+                        num_versao = match_3dig.group(1).strip()
+                    elif match_v:
+                        num_versao = match_v.group(1).strip()
 
-                # 2. Busca no texto visível renderizado no navegador (supera tabelas com tags HTML)
-                if not match_v:
+                # 2. Busca direcionada no DOM da Tabela de Especificações (Modplays / Modyolo)
+                if not num_versao:
                     try:
-                        texto_visivel = page.inner_text("body")
-                        match_v = re.search(r'(?:version|versão|ver)\s*:?\s*v?(\d+\.\d+(?:\.\d+)*)', texto_visivel, re.IGNORECASE)
+                        num_versao = page.evaluate('''() => {
+                            const nodes = Array.from(document.querySelectorAll('tr, div, li, td'));
+                            for (let node of nodes) {
+                                const txt = (node.innerText || '').trim();
+                                if (/^(version|versão)[\s:\n]+v?(\d+\.\d+(?:\.\d+)*)/i.test(txt)) {
+                                    const m = txt.match(/(\d+\.\d+(?:\.\d+)*)/);
+                                    if (m) return m[1];
+                                }
+                                if (/^(version|versão)$/i.test(txt) && node.parentElement) {
+                                    const m = node.parentElement.innerText.match(/(\d+\.\d+(?:\.\d+)*)/);
+                                    if (m) return m[1];
+                                }
+                            }
+                            return null;
+                        }''')
                     except Exception:
                         pass
 
-                # 3. Fallback no HTML bruto aceitando quebras/tags intermediárias
-                if not match_v:
-                    texto_pagina = page.content()
-                    match_v = re.search(r'(?:version|versão|ver)[\s\S]{0,100}?(\d+\.\d+(?:\.\d+)*)', texto_pagina, re.IGNORECASE)
-
-                if match_v:
-                    num_versao = match_v.group(1).strip()
+                if num_versao:
                     dados_jogo["versao"] = f"v{num_versao}"
                 else:
                     dados_jogo["versao"] = "Última Versão"
@@ -321,7 +330,6 @@ def extrair_link_direto(url_alvo):
             print("Aguardando carregamento da página de download...")
             page.wait_for_timeout(10000)
 
-            # Se o Modyolo redirecionou para a subpágina /download/, clica no botão final de download
             if "download" in page.url and "modyolo.com" in page.url and not link_final:
                 print("Detectada página intermediária do Modyolo, clicando no link direto final...")
                 for b in page.locator("a[href]").all():
@@ -337,7 +345,6 @@ def extrair_link_direto(url_alvo):
                     except:
                         continue
 
-            # Varredura final no DOM se o link não foi pego na requisição
             if not link_final:
                 hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
                 for href in hrefs:
