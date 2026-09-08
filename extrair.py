@@ -144,7 +144,7 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
     id_jogo = extrair_id_jogo(url_origem)
 
     nome_jogo = dados_jogo.get("nome", id_jogo.replace('-', ' ').title())
-    versao_jogo = dados_jogo.get("versao", "Última Versão")
+    versao_jogo = dados_jogo.get("versao", "v1.0.0")
     foto_url = FOTO_OFICIAL_SITE
 
     dados_atuais = buscar_dados_atuais_firebase(id_jogo)
@@ -170,7 +170,7 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
         res1 = requests.patch(f"{firebase_base_url}/links/{id_jogo}.json", json=payload)
         res2 = requests.patch(f"{firebase_base_url}/jogos/{id_jogo}.json", json=payload)
         if res1.status_code == 200:
-            print(f"✅ Link e versão atualizados no Firebase para: {id_jogo}")
+            print(f"✅ Link e versão atualizados no Firebase para: {id_jogo} ({versao_jogo})")
             enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo)
             enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo)
     except Exception as e:
@@ -183,7 +183,7 @@ def extrair_link_direto(url_alvo):
 
     dados_jogo = {
         "nome": "Jogo Desconhecido",
-        "versao": "Última Versão",
+        "versao": "v1.0.0",
         "foto": FOTO_OFICIAL_SITE
     }
 
@@ -246,7 +246,7 @@ def extrair_link_direto(url_alvo):
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
 
-            # EXTRAÇÃO DE NOME E VERSÃO BLINDADA (100% PRECISA)
+            # EXTRAÇÃO DE NOME E VERSÃO BLINDADA (100% PRECISA VIA JSON-LD + DOM)
             try:
                 full_title = ""
                 og_elem = page.locator('meta[property="og:title"]').first
@@ -263,44 +263,62 @@ def extrair_link_direto(url_alvo):
                 if not full_title:
                     full_title = page.title()
 
-                num_versao = None
-
-                # 1. Prioridade no Título Principal (Procura no og:title/H1 por versões como v5.4.0 ou 5.4.0)
-                if full_title:
-                    match_3dig = re.search(r'\bv?(\d+\.\d+\.\d+)\b', full_title)
-                    match_v = re.search(r'\bv(\d+\.\d+(?:\.\d+)*)\b', full_title, re.IGNORECASE)
-                    
-                    if match_3dig:
-                        num_versao = match_3dig.group(1).strip()
-                    elif match_v:
-                        num_versao = match_v.group(1).strip()
-
-                # 2. Busca direcionada no DOM da Tabela de Especificações (Modplays / Modyolo)
-                if not num_versao:
-                    try:
-                        num_versao = page.evaluate('''() => {
-                            const nodes = Array.from(document.querySelectorAll('tr, div, li, td'));
-                            for (let node of nodes) {
-                                const txt = (node.innerText || '').trim();
-                                if (/^(version|versão)[\s:\n]+v?(\d+\.\d+(?:\.\d+)*)/i.test(txt)) {
-                                    const m = txt.match(/(\d+\.\d+(?:\.\d+)*)/);
-                                    if (m) return m[1];
-                                }
-                                if (/^(version|versão)$/i.test(txt) && node.parentElement) {
-                                    const m = node.parentElement.innerText.match(/(\d+\.\d+(?:\.\d+)*)/);
-                                    if (m) return m[1];
+                # TÁTICA AVANÇADA JS: Extrai versão diretamente da estrutura oculta (JSON-LD) e DOM
+                num_versao = page.evaluate(r'''() => {
+                    // 1. Tenta extrair do Schema JSON-LD (Modyolo/Modplays usam isso no <head> ou <body>)
+                    const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+                    for (let s of scripts) {
+                        try {
+                            const json = JSON.parse(s.innerText);
+                            const items = Array.isArray(json) ? json : [json];
+                            for (let item of items) {
+                                if (item) {
+                                    const ver = item.softwareVersion || item.version;
+                                    if (ver && /\d+\.\d+/.test(ver)) {
+                                        return ver.toString().trim();
+                                    }
                                 }
                             }
-                            return null;
-                        }''')
-                    except Exception:
-                        pass
+                        } catch(e){}
+                    }
 
+                    // 2. Busca específica na Tabela / Especificações do jogo
+                    const nodes = Array.from(document.querySelectorAll('tr, div, li, td, span, th'));
+                    for (let node of nodes) {
+                        const txt = (node.innerText || '').trim();
+                        if (/^(version|versão)[\s:\n]/i.test(txt) || /^version$/i.test(txt) || /^versão$/i.test(txt)) {
+                            const parentTxt = node.parentElement ? node.parentElement.innerText : txt;
+                            const match = parentTxt.match(/(\d+\.\d+(?:\.\d+)*)/);
+                            if (match && match[1] && !match[1].startsWith('202')) {
+                                return match[1];
+                            }
+                        }
+                    }
+
+                    // 3. Varredura global no texto do Body por "Version X.X.X"
+                    const bodyTxt = document.body ? document.body.innerText : '';
+                    const mBody = bodyTxt.match(/(?:version|versão)\s*:?\s*v?(\d+\.\d+(?:\.\d+)*)/i);
+                    if (mBody && mBody[1] && !mBody[1].startsWith('202')) {
+                        return mBody[1];
+                    }
+
+                    return null;
+                }''')
+
+                # TÁTICA DE RESERVA: Se o JS não achar, busca no Title via RegEx Python
+                if not num_versao and full_title:
+                    match_tit = re.search(r'\bv?(\d+\.\d+(?:\.\d+)*)\b', full_title, re.IGNORECASE)
+                    if match_tit and not match_tit.group(1).startswith("202"):
+                        num_versao = match_tit.group(1).strip()
+
+                # Formata a versão garantindo número limpo
                 if num_versao:
-                    dados_jogo["versao"] = f"v{num_versao}"
+                    num_limpo = re.sub(r'^[vV]', '', str(num_versao).strip())
+                    dados_jogo["versao"] = f"v{num_limpo}"
                 else:
-                    dados_jogo["versao"] = "Última Versão"
+                    dados_jogo["versao"] = "v1.0.0"
 
+                # Limpeza do Nome do Jogo
                 nome_limpo = re.split(r'\s+(?:MOD|v?\d+\.\d+|\(|-|–|Download|APK)', full_title, flags=re.IGNORECASE)[0].strip()
                 nome_limpo = re.sub(r'modyolo\.com|modplays\.com|modyolo|modplays', '', nome_limpo, flags=re.IGNORECASE).strip()
 
