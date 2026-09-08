@@ -250,7 +250,7 @@ def extrair_link_direto(url_alvo):
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
 
-            # EXTRAÇÃO DE NOME E VERSÃO
+            # EXTRAÇÃO DE NOME E VERSÃO BLINDADA
             try:
                 full_title = ""
                 og_elem = page.locator('meta[property="og:title"]').first
@@ -267,9 +267,19 @@ def extrair_link_direto(url_alvo):
                 if not full_title:
                     full_title = page.title()
 
+                # Busca versão no título principal
                 match_v = re.search(r'(?:v|ver|version)?\s*(\d+\.\d+(?:\.\d+)*)', full_title, re.IGNORECASE)
+                
+                # Busca secundária no HTML caso não ache no título
+                if not match_v:
+                    texto_pagina = page.content()
+                    match_v = re.search(r'(?:version|versão|ver)\s*:?\s*v?(\d+\.\d+(?:\.\d+)*)', texto_pagina, re.IGNORECASE)
+
                 if match_v:
-                    dados_jogo["versao"] = f"v{match_v.group(1)}"
+                    num_versao = match_v.group(1).strip()
+                    dados_jogo["versao"] = f"v{num_versao}"
+                else:
+                    dados_jogo["versao"] = "Última Versão"
 
                 nome_limpo = re.split(r'\s+(?:MOD|v?\d+\.\d+|\(|-|–|Download|APK)', full_title, flags=re.IGNORECASE)[0].strip()
                 nome_limpo = re.sub(r'modyolo\.com|modplays\.com|modyolo|modplays', '', nome_limpo, flags=re.IGNORECASE).strip()
