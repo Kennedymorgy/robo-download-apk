@@ -145,14 +145,12 @@ def extrair_versao_do_texto_ou_link(texto_ou_url):
     if not texto_ou_url:
         return None
     
-    # Busca padrão de versão comum em nomes de arquivo APK ou links (ex: v4.2.1, 4-2-1, 4.2.1)
     match_filename = re.search(r'[vV]?(\d+[\.\-_]\d+(?:[\.\-_]\d+)+)', texto_ou_url)
     if match_filename:
         ver_str = match_filename.group(1).replace('-', '.').replace('_', '.')
-        if not ver_str.startswith("202"):  # Evita pegar anos como 2026
+        if not ver_str.startswith("202"):
             return ver_str
 
-    # Busca padrão normal x.x ou x.x.x
     match_std = re.search(r'\b(\d+\.\d+(?:\.\d+)*)\b', texto_ou_url)
     if match_std and not match_std.group(1).startswith("202"):
         return match_std.group(1)
@@ -199,8 +197,10 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
 def extrair_link_direto(url_alvo):
     print(f"Iniciando extração para: {url_alvo}")
 
+    id_fallback = extrair_id_jogo(url_alvo).replace('-', ' ').title()
+
     dados_jogo = {
-        "nome": "Jogo Desconhecido",
+        "nome": id_fallback,
         "versao": "",
         "foto": FOTO_OFICIAL_SITE
     }
@@ -264,7 +264,7 @@ def extrair_link_direto(url_alvo):
                 print("Detectado Cloudflare Challenge, aguardando resolução...")
                 page.wait_for_timeout(8000)
 
-            # --- EXTRAÇÃO DE NOME E VERSÃO (CAMADA MULTI-TURBO) ---
+            # --- EXTRAÇÃO DE NOME E VERSÃO ---
             try:
                 full_title = ""
                 try:
@@ -277,11 +277,11 @@ def extrair_link_direto(url_alvo):
                 if not full_title:
                     full_title = page.title() or ""
 
-                # 1. TENTA VIA JS NO DOM E SCHEMA JSON-LD
+                # 1. TENTA VIA JS NO DOM
                 num_versao = page.evaluate(r'''() => {
                     const elements = Array.from(document.querySelectorAll('tr, td, th, div, li, span, p'));
                     for (let el of elements) {
-                        const txt = (el.innerText || '').strip();
+                        const txt = (el.innerText || '').trim();
                         if (/^(version|versão)$/i.test(txt) || /^version\s*:/i.test(txt) || /^versão\s*:/i.test(txt)) {
                             const parentText = el.parentElement ? el.parentElement.innerText : '';
                             const match = parentText.match(/\b(\d+\.\d+(?:\.\d+)*)\b/);
@@ -297,16 +297,12 @@ def extrair_link_direto(url_alvo):
                 if not num_versao and full_title:
                     num_versao = extrair_versao_do_texto_ou_link(full_title)
 
-                # 3. EXTRAÇÃO DO NOME LIMPO
-                nome_bruto = full_title
-                nome_limpo = re.sub(r'(?i)\s*(?:MOD|APK|v?\d+\.\d+.*|\(.*?\)|-|–|Download).*$', '', nome_bruto).strip()
-                nome_limpo = re.sub(r'(?i)modyolo\.com|modplays\.com|modyolo|modplays', '', nome_limpo).strip()
-
-                if nome_limpo and len(nome_limpo) > 1:
-                    dados_jogo["nome"] = nome_limpo
-                else:
-                    id_limpo = extrair_id_jogo(url_alvo)
-                    dados_jogo["nome"] = id_limpo.replace('-', ' ').title()
+                # 3. EXTRAÇÃO E LIMPEZA DO NOME
+                if full_title and len(full_title.strip()) > 3:
+                    nome_limpo = re.sub(r'(?i)\s*(?:MOD|APK|v?\d+\.\d+.*|\(.*?\)|-|–|Download).*$', '', full_title).strip()
+                    nome_limpo = re.sub(r'(?i)modyolo\.com|modplays\.com|modyolo|modplays', '', nome_limpo).strip()
+                    if nome_limpo and len(nome_limpo) > 1 and nome_limpo.lower() != "download":
+                        dados_jogo["nome"] = nome_limpo
 
                 if num_versao:
                     dados_jogo["versao"] = f"v{num_versao.lstrip('vV')}"
@@ -353,7 +349,7 @@ def extrair_link_direto(url_alvo):
                             link_final = href
                             break
 
-            # 4. CAMADA TURBO FINAL: EXTRAI VERSÃO DIRETO DO LINK DO APK SE AINDA NÃO ACHOU
+            # 4. EXTRAÇÃO DE SEGURANÇA PARA A VERSÃO
             if not dados_jogo["versao"] or dados_jogo["versao"] == "v1.0.0":
                 ver_do_link = extrair_versao_do_texto_ou_link(link_final or "")
                 if ver_do_link:
