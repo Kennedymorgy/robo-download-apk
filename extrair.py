@@ -267,18 +267,24 @@ def extrair_link_direto(url_alvo):
                 if not full_title:
                     full_title = page.title()
 
-                # 1. Busca versão no título principal (padrão com pontos ex: 1.2.3)
-                match_v = re.search(r'(?:v|ver|version)?\.?\s*(\d+\.\d+(?:\.\d+)*)', full_title, re.IGNORECASE)
-                
-                # 2. Busca secundária no HTML caso não ache no título
-                if not match_v:
-                    texto_pagina = page.content()
-                    match_v = re.search(r'(?:version|versão|ver)\s*:?\s*v?\.?\s*(\d+\.\d+(?:\.\d+)*)', texto_pagina, re.IGNORECASE)
+                match_v = None
 
-                # 3. FALLBACK: Procura diretamente por formatos brutos no HTML como v3737, v.3848 ou v 1234
+                # 1. Busca versão no título principal (ex: FRAG Pro Shooter v5.4.0)
+                if full_title:
+                    match_v = re.search(r'(?:v|ver|version)\s*(\d+\.\d+(?:\.\d+)*)', full_title, re.IGNORECASE)
+
+                # 2. Busca no texto visível renderizado no navegador (supera tabelas com tags HTML)
+                if not match_v:
+                    try:
+                        texto_visivel = page.inner_text("body")
+                        match_v = re.search(r'(?:version|versão|ver)\s*:?\s*v?(\d+\.\d+(?:\.\d+)*)', texto_visivel, re.IGNORECASE)
+                    except Exception:
+                        pass
+
+                # 3. Fallback no HTML bruto aceitando quebras/tags intermediárias
                 if not match_v:
                     texto_pagina = page.content()
-                    match_v = re.search(r'v\.?\s*(\d+)', texto_pagina, re.IGNORECASE)
+                    match_v = re.search(r'(?:version|versão|ver)[\s\S]{0,100}?(\d+\.\d+(?:\.\d+)*)', texto_pagina, re.IGNORECASE)
 
                 if match_v:
                     num_versao = match_v.group(1).strip()
@@ -326,118 +332,64 @@ def extrair_link_direto(url_alvo):
                             break
                         elif "download" in (b.inner_text() or "").lower() and "yandex" not in href:
                             b.click(force=True, timeout=3000)
-                            pageO erro principal que estava quebrando o seu código imediatamente era o **`Import sys`** com "I" maiúsculo na primeira linha (o Python exige `import` em minúsculo). Além de corrigir esse erro de sintaxe, adicionei proteções de `timeout` em todas as requisições web (Telegram, WhatsApp e Firebase) para garantir que o seu robô não congele caso alguma API demore a responder.
+                            page.wait_for_timeout(5000)
+                            break
+                    except:
+                        continue
 
-Aqui está o código 100% ajustado e pronto para rodar:
+            # Varredura final no DOM se o link não foi pego na requisição
+            if not link_final:
+                hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
+                for href in hrefs:
+                    if "yandex" not in href and "cdn-cgi" not in href and not href.startswith("blob:"):
+                        if "dl.modplays.com" in href or ("files" in href and "modyolo" in href) or href.endswith(".apk"):
+                            link_final = href
+                            break
 
-```python
-import sys
-import os
-import re
-import requests
-from playwright.sync_api import sync_playwright
+        except Exception as e:
+            print(f"Erro na navegação: {e}")
 
-try:
-    from playwright_stealth import stealth_sync
-except ImportError:
-    stealth_sync = None
+        browser.close()
+        return link_final, dados_jogo
 
-# Pega as chaves salvas nos Secrets do GitHub
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+def salvar_url_na_lista(url):
+    """Guarda a URL no arquivo jogos.txt para o robô monitorar sozinho depois."""
+    arquivo = "jogos.txt"
+    urls_existentes = set()
+    
+    if os.path.exists(arquivo):
+        with open(arquivo, "r", encoding="utf-8") as f:
+            urls_existentes = set(line.strip() for line in f if line.strip())
 
-GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE")
-GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN")
-GREEN_API_GROUP_ID = os.environ.get("GREEN_API_GROUP_ID")
+    if url not in urls_existentes:
+        with open(arquivo, "a", encoding="utf-8") as f:
+            f.write(f"{url}\n")
+        print(f"📝 URL salva em {arquivo} para monitoramento automático.")
 
-# URL DA SUA CLOUDFLARE WORKER
-URL_WORKER = "[https://orange-star-d066.claudiokennedymorgy.workers.dev](https://orange-star-d066.claudiokennedymorgy.workers.dev)"
+def processar_jogo(url_alvo):
+    """Executa a verificação e atualização de um único jogo."""
+    print(f"\n==================================================")
+    link, dados_jogo = extrair_link_direto(url_alvo)
+    if link:
+        id_jogo = salvar_no_firebase_se_novo(url_alvo, link, dados_jogo)
+        salvar_url_na_lista(url_alvo)
+        link_protegido = f"{URL_WORKER}?id={id_jogo}"
+        print(f"LINK_ENCONTRADO:{link_protegido}")
+    else:
+        print(f"❌ Nenhum link direto encontrado para: {url_alvo}")
 
-# SEU BLOG OFICIAL
-PAGINA_INICIAL_BLOG = "[https://k-404modapk.blogspot.com/?m=1](https://k-404modapk.blogspot.com/?m=1)"
-FOTO_OFICIAL_SITE = "[https://k-404modapk.blogspot.com/favicon.ico](https://k-404modapk.blogspot.com/favicon.ico)"
-
-def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
-    """Envia mensagem no Telegram com a foto oficial do site."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("⚠️ Telegram não configurado nos Secrets. Pulando notificação.")
-        return
-
-    mensagem = (
-        f"🔥 <b>JOGO ATUALIZADO!</b>\n\n"
-        f"🎮 <b>Jogo:</b> {nome_jogo}\n"
-        f"📦 <b>Versão:</b> {versao_jogo}\n"
-        f"🔗 <b>Página:</b> <a href='{PAGINA_INICIAL_BLOG}'>Baixar no Blog</a>\n\n"
-        f"⚡ <i>Nova versão disponível no servidor! Atualize os dados no Blogger se necessário.</i>"
-    )
-
-    url_api = f"[https://api.telegram.org/bot](https://api.telegram.org/bot){TELEGRAM_BOT_TOKEN}/sendPhoto"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "photo": FOTO_OFICIAL_SITE,
-        "caption": mensagem,
-        "parse_mode": "HTML"
-    }
-
-    try:
-        res = requests.post(url_api, json=payload, timeout=15)
-        if res.status_code != 200:
-            url_api_msg = f"[https://api.telegram.org/bot](https://api.telegram.org/bot){TELEGRAM_BOT_TOKEN}/sendMessage"
-            payload_msg = {
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": mensagem,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": False
-            }
-            res = requests.post(url_api_msg, json=payload_msg, timeout=15)
-
-        if res.status_code == 200:
-            print(f"📢 Notificação enviada para o Telegram: {nome_jogo} ({versao_jogo})")
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1].startswith("http"):
+        url_single = sys.argv[1]
+        processar_jogo(url_single)
+    else:
+        arquivo_jogos = "jogos.txt"
+        if os.path.exists(arquivo_jogos):
+            with open(arquivo_jogos, "r", encoding="utf-8") as f:
+                lista_urls = [linha.strip() for linha in f if linha.strip()]
+            
+            print(f"🤖 Rodando em modo automático. {len(lista_urls)} jogo(s) para verificar...")
+            for url in lista_urls:
+                processar_jogo(url)
         else:
-            print(f"❌ Erro ao enviar Telegram: {res.text}")
-    except Exception as e:
-        print(f"❌ Erro na API do Telegram: {e}")
-
-def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
-    """Envia mensagem no WhatsApp via GREEN-API com Foto + Legenda."""
-    if not GREEN_API_INSTANCE or not GREEN_API_TOKEN or not GREEN_API_GROUP_ID:
-        print("⚠️ GREEN-API não configurada nos Secrets. Pulando WhatsApp.")
-        return
-
-    chat_id = GREEN_API_GROUP_ID.strip()
-    if not chat_id.endswith("@g.us") and not chat_id.endswith("@c.us"):
-        chat_id = f"{chat_id}@g.us"
-
-    mensagem = (
-        f"🔥 *JOGO ATUALIZADO!*\n\n"
-        f"🎮 *Jogo:* {nome_jogo}\n"
-        f"📦 *Versão:* {versao_jogo}\n"
-        f"🔗 *Página:* {PAGINA_INICIAL_BLOG}\n\n"
-        f"⚡ _Nova versão disponível no servidor! Atualize os dados no Blogger se necessário._"
-    )
-
-    url_file = f"[https://api.green-api.com/waInstance](https://api.green-api.com/waInstance){GREEN_API_INSTANCE}/sendFileByUrl/{GREEN_API_TOKEN}"
-    payload_file = {
-        "chatId": chat_id,
-        "urlFile": FOTO_OFICIAL_SITE,
-        "fileName": "icon.ico",
-        "caption": mensagem
-    }
-
-    try:
-        print(f"🔄 Enviando WhatsApp (Foto + Legenda) para: {chat_id}")
-        res = requests.post(url_file, json=payload_file, timeout=15)
-
-        if res.status_code != 200:
-            print("⚠️ Falha no envio de arquivo. Tentando enviar como texto simples...")
-            url_msg = f"[https://api.green-api.com/waInstance](https://api.green-api.com/waInstance){GREEN_API_INSTANCE}/sendMessage/{GREEN_API_TOKEN}"
-            payload_msg = {
-                "chatId": chat_id,
-                "message": mensagem
-            }
-            res = requests.post(url_msg, json=payload_msg, timeout=15)
-
-        if res.status_code == 200:
-            print(f"🟢 Notificação enviada com sucesso para o WhatsApp: {nome_jogo} ({versao_jogo})")
-        else:
-            print(f
+            print("⚠️ Nenhuma URL cadastrada no 'jogos.txt'. Adicione uma URL manualmente primeiro.")
