@@ -14,7 +14,6 @@ on:
 jobs:
   extrair:
     runs-on: ubuntu-latest
-    # Permissão necessária para o bot do GitHub conseguir salvar/atualizar o jogos.txt
     permissions:
       contents: write
 
@@ -40,6 +39,7 @@ jobs:
           GREEN_API_INSTANCE: ${{ secrets.GREEN_API_INSTANCE }}
           GREEN_API_TOKEN: ${{ secrets.GREEN_API_TOKEN }}
           GREEN_API_GROUP_ID: ${{ secrets.GREEN_API_GROUP_ID }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: |
           if [ -n "${{ github.event.inputs.url_manual }}" ]; then
             python extrair.py "${{ github.event.inputs.url_manual }}"
