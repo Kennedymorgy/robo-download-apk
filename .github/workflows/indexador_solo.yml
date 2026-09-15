@@ -22,7 +22,7 @@ jobs:
       - name: Instalar Dependencias Leves
         run: |
           python -m pip install --upgrade pip
-          pip install requests google-auth
+          pip install requests google-auth google-api-python-client
 
       - name: Executar Indexador Solo
         env:
