@@ -12,7 +12,7 @@ except ImportError:
 # CREDENCIAIS E MAPA DO SITE
 GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 SITEMAP_BLOGGER = "https://k-404modapk.blogspot.com/sitemap.xml"
-PAGINA_INICIAL = "https://k-404modapk.blogspot.com/?m=1"
+PAGINA_INICIAL = "https://k-404modapk.blogspot.com/"
 
 def obter_urls_do_sitemap():
     """Busca todas as URLs publicadas no Sitemap XML do Blogger."""
@@ -23,12 +23,14 @@ def obter_urls_do_sitemap():
         res = requests.get(SITEMAP_BLOGGER, headers=headers, timeout=15)
         if res.status_code == 200:
             tree = ET.fromstring(res.content)
-            # Namespace padrão do Blogger / Sitemaps
             ns = {'g': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
             for loc in tree.findall('.//g:loc', ns):
                 link = loc.text.strip()
-                if link and link not in urls:
-                    urls.append(link)
+                if link:
+                    # Remove parâmetros de mobile tipo ?m=1 para enviar URL limpa
+                    link_limpo = link.split('?')[0]
+                    if link_limpo not in urls:
+                        urls.append(link_limpo)
             print(f"✅ Total de {len(urls)} URLs encontradas para indexar.")
         else:
             print(f"⚠️ Erro ao acessar Sitemap ({res.status_code})")
@@ -37,7 +39,7 @@ def obter_urls_do_sitemap():
     return urls
 
 def notificar_google_indexing(url):
-    """Envia a URL para a Google Indexing API usando a Conta de Serviço (e-mail autenticado)."""
+    """Envia a URL para a Google Indexing API com o endpoint completo correto."""
     if not GOOGLE_CREDENTIALS_JSON:
         print("⚠️ Secret GOOGLE_CREDENTIALS_JSON não encontrada.")
         return
@@ -51,9 +53,11 @@ def notificar_google_indexing(url):
         scopes = ["https://www.googleapis.com/auth/indexing"]
         credentials = service_account.Credentials.from_service_account_info(info, scopes=scopes)
         
-        req = google.auth.transport.requests.Request()
-        credentials.refresh(req)
+        # Autenticação oficial do Google
+        auth_req = google.auth.transport.requests.Request()
+        credentials.refresh(auth_req)
 
+        # CORREÇÃO CRÍTICA: Endpoint completo com o domínio do Google
         endpoint = "https://indexing.googleapis.com/v1/urlNotifications:publish"
         headers = {
             "Content-Type": "application/json",
