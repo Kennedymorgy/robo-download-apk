@@ -3,13 +3,9 @@ import json
 import requests
 import xml.etree.ElementTree as ET
 
-try:
-    from google.oauth2 import service_account
-    import google.auth.transport.requests
-except ImportError:
-    service_account = None
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
-# CREDENCIAIS E MAPA DO SITE
 GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 SITEMAP_BLOGGER = "https://k-404modapk.blogspot.com/sitemap.xml"
 PAGINA_INICIAL = "https://k-404modapk.blogspot.com/"
@@ -27,7 +23,6 @@ def obter_urls_do_sitemap():
             for loc in tree.findall('.//g:loc', ns):
                 link = loc.text.strip()
                 if link:
-                    # Remove parâmetros de mobile tipo ?m=1 para enviar URL limpa
                     link_limpo = link.split('?')[0]
                     if link_limpo not in urls:
                         urls.append(link_limpo)
@@ -38,49 +33,43 @@ def obter_urls_do_sitemap():
         print(f"❌ Falha ao processar Sitemap XML: {e}")
     return urls
 
-def notificar_google_indexing(url):
-    """Envia a URL para a Google Indexing API com o endpoint completo correto."""
+def inicializar_servico_indexing():
+    """Autentica e cria o serviço oficial da Google Indexing API."""
     if not GOOGLE_CREDENTIALS_JSON:
         print("⚠️ Secret GOOGLE_CREDENTIALS_JSON não encontrada.")
-        return
-
-    if not service_account:
-        print("⚠️ Módulo 'google-auth' não encontrado.")
-        return
+        return None
 
     try:
         info = json.loads(GOOGLE_CREDENTIALS_JSON)
         scopes = ["https://www.googleapis.com/auth/indexing"]
         credentials = service_account.Credentials.from_service_account_info(info, scopes=scopes)
         
-        # Autenticação oficial do Google
-        auth_req = google.auth.transport.requests.Request()
-        credentials.refresh(auth_req)
+        service = build('indexing', 'v3', credentials=credentials)
+        return service
+    except Exception as e:
+        print(f"❌ Erro ao autenticar com a API do Google: {e}")
+        return None
 
-        # CORREÇÃO CRÍTICA: Endpoint completo com o domínio do Google
-        endpoint = "https://indexing.googleapis.com/v1/urlNotifications:publish"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {credentials.token}"
-        }
-        payload = {
+def notificar_google_indexing(service, url):
+    """Envia solicitação de indexação utilizando a biblioteca oficial."""
+    try:
+        body = {
             "url": url,
             "type": "URL_UPDATED"
         }
-
-        res = requests.post(endpoint, headers=headers, json=payload)
-        if res.status_code == 200:
-            print(f"🚀 [OK] Indexação enviada -> {url}")
-        else:
-            print(f"❌ Erro ({res.status_code}) ao indexar {url}: {res.text}")
+        response = service.urlNotifications().publish(body=body).execute()
+        print(f"🚀 [OK] Indexação enviada -> {url}")
     except Exception as e:
-        print(f"❌ Erro crítico no envio para o Google: {e}")
+        print(f"❌ Erro ao indexar {url}: {e}")
 
 if __name__ == "__main__":
     print("🤖 Iniciando Robô Solo de Indexação Automática...")
-    lista_urls = obter_urls_do_sitemap()
     
-    for url_jogo in lista_urls:
-        notificar_google_indexing(url_jogo)
-        
-    print("✨ Processo concluído com sucesso!")
+    servico_indexing = inicializar_servico_indexing()
+    if servico_indexing:
+        lista_urls = obter_urls_do_sitemap()
+        for url_jogo in lista_urls:
+            notificar_google_indexing(servico_indexing, url_jogo)
+        print("✨ Processo concluído com sucesso!")
+    else:
+        print("❌ Falha de autenticação na API do Google.")
