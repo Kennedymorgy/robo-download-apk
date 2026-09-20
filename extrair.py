@@ -16,7 +16,7 @@ try:
 except ImportError:
     stealth_sync = None
 
-# Variaveis de ambiente (GitHub Secrets)
+# Pega as chaves salvas nos Secrets do GitHub
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -26,49 +26,48 @@ GREEN_API_GROUP_ID = os.environ.get("GREEN_API_GROUP_ID")
 
 GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 
-# CLOUDFLARE WORKER E BLOGGER OFICIAL
+# URL DA SUA CLOUDFLARE WORKER
 URL_WORKER = "https://orange-star-d066.claudiokennedymorgy.workers.dev"
-PAGINA_INICIAL_BLOG = "https://k-404modapk.blogspot.com/"
+
+# SEU BLOG OFICIAL
+PAGINA_INICIAL_BLOG = "https://k-404modapk.blogspot.com/?m=1"
 FOTO_OFICIAL_SITE = "https://k-404modapk.blogspot.com/favicon.ico"
 
-def normalizar_url_blogspot(url):
-    """Garante URL canônica limpa sem parâmetros como ?m=1 para aceitação no Google."""
-    if not url:
-        return ""
-    url_limpa = url.split('?')[0].split('#')[0]
-    if not url_limpa.endswith('/') and not url_limpa.endswith('.html'):
-        url_limpa += '/'
-    return url_limpa
+def ping_sitemap_google(domain_blog):
+    """Notifica o Google enviando um Ping no Sitemap oficial do blog para forçar a indexação."""
+    try:
+        base_domain = domain_blog.split('?')[0].rstrip('/')
+        sitemap_url = f"{base_domain}/sitemap.xml"
+        ping_url = f"https://www.google.com/ping?sitemap={sitemap_url}"
+        res = requests.get(ping_url, timeout=10)
+        if res.status_code in [200, 204]:
+            print(f"📡 Ping de Sitemap enviado com sucesso para o Google: {sitemap_url}")
+        else:
+            print(f"⚠️ Ping de Sitemap retornou status {res.status_code}")
+    except Exception as e:
+        print(f"⚠️ Erro ao enviar ping do Sitemap: {e}")
 
 def notificar_google_indexing_api(url_para_indexar):
-    """Envia a URL canônica para a Google Indexing API e dispara Ping de Sitemap/Atom."""
-    url_limpa = normalizar_url_blogspot(url_para_indexar)
-    
-    # Validação rigorosa: só envia o seu próprio domínio
-    if "k-404modapk.blogspot.com" not in url_limpa:
-        print(f"⚠️ URL externa ignorada ({url_limpa}). O Google rejeita domínios de terceiros.")
-        return
-
-    # 1. PING AUTOMÁTICO DE SITEMAPS (Sitemap XML + Atom Feed)
-    sitemaps = [
-        f"{PAGINA_INICIAL_BLOG}sitemap.xml",
-        f"{PAGINA_INICIAL_BLOG}atom.xml?redirect=false&start-index=1&max-results=500"
-    ]
-    for sm in sitemaps:
-        try:
-            requests.get(f"https://www.google.com/ping?sitemap={sm}", timeout=5)
-        except Exception:
-            pass
-    print("📡 Ping de Sitemap/Atom disparado ao Google!")
-
-    # 2. SOLICITAÇÃO DIRETA À GOOGLE INDEXING API
+    """Envia solicitação para a Google Indexing API para indexar/atualizar as URLs no Google Search (Desktop e Mobile)."""
     if not GOOGLE_CREDENTIALS_JSON:
-        print("⚠️ GOOGLE_CREDENTIALS_JSON não configurado. Pulando Google Indexing.")
+        print("⚠️ GOOGLE_CREDENTIALS_JSON não configurado nos Secrets. Pulando Google Indexing.")
         return
 
     if not service_account:
-        print("⚠️ Módulo 'google-auth' não encontrado no requirements.txt.")
+        print("⚠️ Módulo 'google-auth' não encontrado. Certifique-se de adicioná-lo no requirements.txt.")
         return
+
+    # Garante o envio de variações (Desktop e Mobile ?m=1) para indexação 100% completa
+    urls_para_enviar = set()
+    urls_para_enviar.add(url_para_indexar)
+    
+    if "?m=1" in url_para_indexar:
+        urls_para_enviar.add(url_para_indexar.replace("?m=1", ""))
+    else:
+        if "?" in url_para_indexar:
+            urls_para_enviar.add(f"{url_para_indexar}&m=1")
+        else:
+            urls_para_enviar.add(f"{url_para_indexar}?m=1")
 
     try:
         info = json.loads(GOOGLE_CREDENTIALS_JSON)
@@ -84,23 +83,26 @@ def notificar_google_indexing_api(url_para_indexar):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}"
         }
-        payload = {
-            "url": url_limpa,
-            "type": "URL_UPDATED"
-        }
 
-        res = requests.post(endpoint, headers=headers, json=payload, timeout=8)
-        if res.status_code == 200:
-            print(f"🚀 Google Indexing API: Notificado com sucesso -> {url_limpa}")
-        else:
-            print(f"❌ Erro na Google Indexing API ({res.status_code}): {res.text}")
+        for url_alvo in urls_para_enviar:
+            payload = {
+                "url": url_alvo,
+                "type": "URL_UPDATED"
+            }
+
+            res = requests.post(endpoint, headers=headers, json=payload)
+            if res.status_code == 200:
+                print(f"🚀 Google Indexing API: Solicitada indexação com sucesso -> {url_alvo}")
+            else:
+                print(f"❌ Erro na Google Indexing API ({res.status_code}) para {url_alvo}: {res.text}")
+
     except Exception as e:
-        print(f"❌ Falha ao comunicar com Google Indexing API: {e}")
+        print(f"❌ Erro ao enviar para Google Indexing API: {e}")
 
 def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
-    """Envia aviso no Telegram."""
+    """Envia mensagem no Telegram com a foto oficial do site."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("⚠️ Telegram não configurado nos Secrets. Pulando.")
+        print("⚠️ Telegram não configurado nos Secrets. Pulando notificação.")
         return
 
     mensagem = (
@@ -108,7 +110,7 @@ def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
         f"🎮 <b>Jogo:</b> {nome_jogo}\n"
         f"📦 <b>Versão:</b> {versao_jogo}\n"
         f"🔗 <b>Página:</b> <a href='{PAGINA_INICIAL_BLOG}'>Baixar no Blog</a>\n\n"
-        f"⚡ <i>Nova versão salva no servidor!</i>"
+        f"⚡ <i>Nova versão disponível no servidor! Atualize os dados no Blogger se necessário.</i>"
     )
 
     url_api = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
@@ -120,23 +122,28 @@ def enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo):
     }
 
     try:
-        res = requests.post(url_api, json=payload, timeout=8)
+        res = requests.post(url_api, json=payload)
         if res.status_code != 200:
-            url_msg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            requests.post(url_msg, json={
+            url_api_msg = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            payload_msg = {
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": mensagem,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": False
-            }, timeout=8)
-        print(f"📢 Notificação enviada para o Telegram: {nome_jogo} ({versao_jogo})")
+            }
+            res = requests.post(url_api_msg, json=payload_msg)
+
+        if res.status_code == 200:
+            print(f"📢 Notificação enviada para o Telegram: {nome_jogo} ({versao_jogo})")
+        else:
+            print(f"❌ Erro ao enviar Telegram: {res.text}")
     except Exception as e:
-        print(f"❌ Erro no Telegram: {e}")
+        print(f"❌ Erro na API do Telegram: {e}")
 
 def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
-    """Envia aviso no WhatsApp via GREEN-API."""
+    """Envia mensagem no WhatsApp via GREEN-API com Foto + Legenda."""
     if not GREEN_API_INSTANCE or not GREEN_API_TOKEN or not GREEN_API_GROUP_ID:
-        print("⚠️ GREEN-API não configurada nos Secrets. Pulando.")
+        print("⚠️ GREEN-API não configurada nos Secrets. Pulando WhatsApp.")
         return
 
     chat_id = GREEN_API_GROUP_ID.strip()
@@ -148,7 +155,7 @@ def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
         f"🎮 *Jogo:* {nome_jogo}\n"
         f"📦 *Versão:* {versao_jogo}\n"
         f"🔗 *Página:* {PAGINA_INICIAL_BLOG}\n\n"
-        f"⚡ _Nova versão disponível!_"
+        f"⚡ _Nova versão disponível no servidor! Atualize os dados no Blogger se necessário._"
     )
 
     url_file = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendFileByUrl/{GREEN_API_TOKEN}"
@@ -160,19 +167,30 @@ def enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo):
     }
 
     try:
-        res = requests.post(url_file, json=payload_file, timeout=8)
+        print(f"🔄 Enviando WhatsApp (Foto + Legenda) para: {chat_id}")
+        res = requests.post(url_file, json=payload_file)
+
         if res.status_code != 200:
+            print("⚠️ Falha no envio de arquivo. Tentando enviar como texto simples...")
             url_msg = f"https://api.green-api.com/waInstance{GREEN_API_INSTANCE}/sendMessage/{GREEN_API_TOKEN}"
-            requests.post(url_msg, json={"chatId": chat_id, "message": mensagem}, timeout=8)
-        print(f"🟢 Notificação enviada para o WhatsApp: {nome_jogo} ({versao_jogo})")
+            payload_msg = {
+                "chatId": chat_id,
+                "message": mensagem
+            }
+            res = requests.post(url_msg, json=payload_msg)
+
+        if res.status_code == 200:
+            print(f"🟢 Notificação enviada com sucesso para o WhatsApp: {nome_jogo} ({versao_jogo})")
+        else:
+            print(f"❌ Falha ao enviar WhatsApp. Verifique as credenciais no GitHub.")
     except Exception as e:
-        print(f"❌ Erro no WhatsApp: {e}")
+        print(f"❌ Erro crítico na API do WhatsApp: {e}")
 
 def buscar_dados_atuais_firebase(id_jogo):
-    """Busca dados armazenados no Firebase."""
+    """Consulta os dados atuais salvos no Firebase."""
     firebase_base_url = "https://meublog-apks-default-rtdb.firebaseio.com"
     try:
-        res = requests.get(f"{firebase_base_url}/links/{id_jogo}.json", timeout=8)
+        res = requests.get(f"{firebase_base_url}/links/{id_jogo}.json")
         if res.status_code == 200 and res.text != 'null':
             return res.json()
     except Exception as e:
@@ -180,18 +198,25 @@ def buscar_dados_atuais_firebase(id_jogo):
     return {}
 
 def extrair_id_jogo(url_origem):
-    """Gera um ID limpo a partir da URL."""
+    """Extrai o ID correto do jogo ignorando sufixos como /download/, /0/, /1/, .html, etc."""
     url_limpa = url_origem.split(']')[0].rstrip('/')
     partes = url_limpa.split('/')
+    
     partes_filtradas = [
         p for p in partes 
         if p and p not in ['download', 'file'] and not p.isdigit()
     ]
-    id_jogo = partes_filtradas[-1] if partes_filtradas else "jogo"
-    return id_jogo.replace('.html', '').replace('.apk', '')
+    
+    if partes_filtradas:
+        id_jogo = partes_filtradas[-1]
+    else:
+        id_jogo = "jogo"
+        
+    id_jogo = id_jogo.replace('.html', '').replace('.apk', '')
+    return id_jogo
 
 def extrair_versao_do_texto_ou_link(texto_ou_url):
-    """Extrai número de versão de títulos ou links."""
+    """Extrai padrões numéricos de versão (ex: 3.8.0, 4.2.1, 1.23.4) de strings ou URLs de download."""
     if not texto_ou_url:
         return None
     
@@ -209,40 +234,47 @@ def extrair_versao_do_texto_ou_link(texto_ou_url):
 
 def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
     id_jogo = extrair_id_jogo(url_origem)
+
     nome_jogo = dados_jogo.get("nome", id_jogo.replace('-', ' ').title())
     versao_jogo = dados_jogo.get("versao", "v1.0.0")
+    foto_url = FOTO_OFICIAL_SITE
 
     dados_atuais = buscar_dados_atuais_firebase(id_jogo)
     link_atual = dados_atuais.get("link_direto") if isinstance(dados_atuais, dict) else None
     versao_atual = dados_atuais.get("versao") if isinstance(dados_atuais, dict) else None
 
     if link_atual == link_novo and versao_atual == versao_jogo:
-        print(f"⏩ Jogo '{id_jogo}' já está atualizado ({versao_jogo}). Nenhuma ação necessária.")
+        print(f"⏩ O jogo '{id_jogo}' continua com o mesmo link ({versao_jogo}). Nenhuma notificação enviada.")
         return id_jogo
 
-    print(f"🔄 Atualização detectada para '{id_jogo}'! Salvando no Firebase...")
+    print(f"🔄 Nova versão/link detectado para '{id_jogo}'! Atualizando no Firebase...")
     firebase_base_url = "https://meublog-apks-default-rtdb.firebaseio.com"
     payload = {
         "url_original": url_origem,
         "link_direto": link_novo,
         "nome": nome_jogo,
         "versao": versao_jogo,
-        "foto": FOTO_OFICIAL_SITE
+        "foto": foto_url
     }
 
     try:
-        res1 = requests.patch(f"{firebase_base_url}/links/{id_jogo}.json", json=payload, timeout=8)
-        requests.patch(f"{firebase_base_url}/jogos/{id_jogo}.json", json=payload, timeout=8)
-        
+        res1 = requests.patch(f"{firebase_base_url}/links/{id_jogo}.json", json=payload)
+        res2 = requests.patch(f"{firebase_base_url}/jogos/{id_jogo}.json", json=payload)
         if res1.status_code == 200:
-            print(f"✅ Firebase atualizado: {id_jogo} ({versao_jogo})")
+            print(f"✅ Link e versão atualizados no Firebase para: {id_jogo} ({versao_jogo})")
             enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo)
             enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo)
             
-            # --- INDEXAÇÃO AUTOMÁTICA NO GOOGLE ---
+            # --- INDEXAÇÃO AUTOMÁTICA COMPLETA NO GOOGLE ---
+            # 1. Notifica a Indexing API para a página inicial do blog (Desktop e Mobile)
             notificar_google_indexing_api(PAGINA_INICIAL_BLOG)
+            
+            # 2. Se a URL de origem for do próprio blog Blogger/k-404, envia para a Indexing API
             if "blogspot.com" in url_origem or "k-404" in url_origem:
                 notificar_google_indexing_api(url_origem)
+
+            # 3. Dispara o Ping de Sitemap para o Google reindexar tudo 100%
+            ping_sitemap_google(PAGINA_INICIAL_BLOG)
 
     except Exception as e:
         print(f"❌ Erro ao salvar no Firebase: {e}")
@@ -250,7 +282,8 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
     return id_jogo
 
 def extrair_link_direto(url_alvo):
-    print(f"🔍 Extraindo: {url_alvo}")
+    print(f"Iniciando extração para: {url_alvo}")
+
     id_fallback = extrair_id_jogo(url_alvo).replace('-', ' ').title()
 
     dados_jogo = {
@@ -266,9 +299,7 @@ def extrair_link_direto(url_alvo):
                 '--disable-blink-features=AutomationControlled',
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--disable-gpu',
+                '--disable-infobars',
                 '--window-size=375,812',
             ]
         )
@@ -278,13 +309,11 @@ def extrair_link_direto(url_alvo):
             viewport={"width": 375, "height": 812},
             is_mobile=True,
             has_touch=True,
-            locale="pt-BR"
+            locale="pt-BR",
+            accept_downloads=True
         )
 
         page = context.new_page()
-
-        # OTIMIZAÇÃO DE VELOCIDADE: Bloqueia imagens, fontes e mídias desnecessárias
-        page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "font", "media"] else route.continue_())
 
         if stealth_sync:
             stealth_sync(page)
@@ -297,71 +326,107 @@ def extrair_link_direto(url_alvo):
             nonlocal link_final
             url = request.url
 
-            ignorar = ["yandex", "mc.yandex", "google-analytics", "googletagmanager", "facebook", "doubleclick", "cdn-cgi"]
-            if any(dom in url for dom in ignorar):
+            ignorar_dominios = [
+                "yandex", "mc.yandex", "google-analytics", "googletagmanager", 
+                "facebook", "doubleclick", "cdn-cgi", "challenge-platform"
+            ]
+            if any(dom in url for dom in ignorar_dominios):
                 return
 
             if not url.startswith("blob:") and "play.google.com" not in url:
-                if "dl.modplays.com" in url or ("files" in url and "modyolo" in url) or url.endswith(".apk") or ".apk?" in url:
+                if "dl.modplays.com" in url:
+                    link_final = url
+                elif "files" in url and "modyolo" in url:
+                    link_final = url
+                elif url.endswith(".apk") or ".apk?" in url:
                     link_final = url
 
         page.on("request", interceptar_requisicao)
 
         try:
-            page.goto(url_alvo, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(2000)
+            page.goto(url_alvo, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(4000)
 
-            # Extração rápida de metadados (Título e Versão)
-            full_title = ""
+            if "cloudflare" in page.content().lower() or "just a moment" in page.title().lower():
+                print("Detectado Cloudflare Challenge, aguardando resolução...")
+                page.wait_for_timeout(8000)
+
+            # --- EXTRAÇÃO DE NOME E VERSÃO ---
             try:
-                og_elem = page.locator('meta[property="og:title"]').first
-                if og_elem.count() > 0:
-                    full_title = og_elem.get_attribute("content") or ""
-            except:
-                pass
+                full_title = ""
+                try:
+                    og_elem = page.locator('meta[property="og:title"]').first
+                    if og_elem.count() > 0:
+                        full_title = og_elem.get_attribute("content") or ""
+                except:
+                    pass
 
-            if not full_title:
-                full_title = page.title() or ""
+                if not full_title:
+                    full_title = page.title() or ""
 
-            num_versao = page.evaluate(r'''() => {
-                const elements = Array.from(document.querySelectorAll('tr, td, th, div, li, span, p'));
-                for (let el of elements) {
-                    const txt = (el.innerText || '').trim();
-                    if (/^(version|versão)$/i.test(txt) || /^version\s*:/i.test(txt) || /^versão\s*:/i.test(txt)) {
-                        const parentText = el.parentElement ? el.parentElement.innerText : '';
-                        const match = parentText.match(/\b(\d+\.\d+(?:\.\d+)*)\b/);
-                        if (match && match[1] && !match[1].startsWith('202')) {
-                            return match[1];
+                # 1. TENTA VIA JS NO DOM
+                num_versao = page.evaluate(r'''() => {
+                    const elements = Array.from(document.querySelectorAll('tr, td, th, div, li, span, p'));
+                    for (let el of elements) {
+                        const txt = (el.innerText || '').trim();
+                        if (/^(version|versão)$/i.test(txt) || /^version\s*:/i.test(txt) || /^versão\s*:/i.test(txt)) {
+                            const parentText = el.parentElement ? el.parentElement.innerText : '';
+                            const match = parentText.match(/\b(\d+\.\d+(?:\.\d+)*)\b/);
+                            if (match && match[1] && !match[1].startsWith('202')) {
+                                return match[1];
+                            }
                         }
                     }
-                }
-                return null;
-            }''')
+                    return null;
+                }''')
 
-            if not num_versao and full_title:
-                num_versao = extrair_versao_do_texto_ou_link(full_title)
+                # 2. SE NÃO ACHOU, EXTRAI DO TÍTULO COMPLETO
+                if not num_versao and full_title:
+                    num_versao = extrair_versao_do_texto_ou_link(full_title)
 
-            if full_title and len(full_title.strip()) > 3:
-                nome_limpo = re.sub(r'(?i)\s*(?:MOD|APK|v?\d+\.\d+.*|\(.*?\)|-|–|Download).*$', '', full_title).strip()
-                nome_limpo = re.sub(r'(?i)modyolo\.com|modplays\.com|modyolo|modplays', '', nome_limpo).strip()
-                if nome_limpo and len(nome_limpo) > 1 and nome_limpo.lower() != "download":
-                    dados_jogo["nome"] = nome_limpo
+                # 3. EXTRAÇÃO E LIMPEZA DO NOME
+                if full_title and len(full_title.strip()) > 3:
+                    nome_limpo = re.sub(r'(?i)\s*(?:MOD|APK|v?\d+\.\d+.*|\(.*?\)|-|–|Download).*$', '', full_title).strip()
+                    nome_limpo = re.sub(r'(?i)modyolo\.com|modplays\.com|modyolo|modplays', '', nome_limpo).strip()
+                    if nome_limpo and len(nome_limpo) > 1 and nome_limpo.lower() != "download":
+                        dados_jogo["nome"] = nome_limpo
 
-            if num_versao:
-                dados_jogo["versao"] = f"v{num_versao.lstrip('vV')}"
+                if num_versao:
+                    dados_jogo["versao"] = f"v{num_versao.lstrip('vV')}"
 
-            # Clique otimizado no botão de Download
-            for b in page.locator("a, button").all():
+            except Exception as err_meta:
+                print(f"⚠️ Erro ao extrair metadados da página: {err_meta}")
+
+            print("Procurando botão inicial de download...")
+            botoes = page.locator("a, button").all()
+            for b in botoes:
                 try:
                     texto = (b.inner_text() or "").lower()
                     href = b.get_attribute("href") or ""
                     if ("download" in texto or "download" in href) and "play.google.com" not in href:
-                        b.click(force=True, timeout=2000)
+                        b.click(force=True, timeout=3000)
+                        print("Botão acionado com sucesso!")
                         break
                 except:
                     continue
 
-            page.wait_for_timeout(4000)
+            print("Aguardando carregamento da página de download...")
+            page.wait_for_timeout(10000)
+
+            if "download" in page.url and "modyolo.com" in page.url and not link_final:
+                print("Detectada página intermediária do Modyolo, clicando no link direto final...")
+                for b in page.locator("a[href]").all():
+                    try:
+                        href = b.get_attribute("href") or ""
+                        if ("files" in href and "modyolo" in href) or href.endswith(".apk") or "dl.modplays.com" in href:
+                            link_final = href
+                            break
+                        elif "download" in (b.inner_text() or "").lower() and "yandex" not in href:
+                            b.click(force=True, timeout=3000)
+                            page.wait_for_timeout(5000)
+                            break
+                    except:
+                        continue
 
             if not link_final:
                 hrefs = page.eval_on_selector_all("a[href]", "elements => elements.map(e => e.href)")
@@ -371,23 +436,28 @@ def extrair_link_direto(url_alvo):
                             link_final = href
                             break
 
+            # 4. EXTRAÇÃO DE SEGURANÇA PARA A VERSÃO
             if not dados_jogo["versao"] or dados_jogo["versao"] == "v1.0.0":
-                ver_do_link = extrair_versao_do_texto_ou_link(link_final or "") or extrair_versao_do_texto_ou_link(url_alvo)
+                ver_do_link = extrair_versao_do_texto_ou_link(link_final or "")
                 if ver_do_link:
                     dados_jogo["versao"] = f"v{ver_do_link.lstrip('vV')}"
                 else:
-                    dados_jogo["versao"] = "v1.0.0"
+                    ver_da_url = extrair_versao_do_texto_ou_link(url_alvo)
+                    if ver_da_url:
+                        dados_jogo["versao"] = f"v{ver_da_url.lstrip('vV')}"
+                    else:
+                        dados_jogo["versao"] = "v1.0.0"
 
-            print(f"🎯 Extraído -> Jogo: '{dados_jogo['nome']}' | Versão: '{dados_jogo['versao']}'")
+            print(f"🎯 Metadados Extraídos -> Jogo: '{dados_jogo['nome']}' | Versão: '{dados_jogo['versao']}'")
 
         except Exception as e:
-            print(f"Erro na extração: {e}")
+            print(f"Erro na navegação: {e}")
 
         browser.close()
         return link_final, dados_jogo
 
 def salvar_url_na_lista(url):
-    """Guarda a URL no jogos.txt sem duplicatas."""
+    """Guarda a URL no arquivo jogos.txt para o robô monitorar sozinho depois."""
     arquivo = "jogos.txt"
     urls_existentes = set()
     
@@ -398,10 +468,10 @@ def salvar_url_na_lista(url):
     if url not in urls_existentes:
         with open(arquivo, "a", encoding="utf-8") as f:
             f.write(f"{url}\n")
-        print(f"📝 Registrado em {arquivo}.")
+        print(f"📝 URL salva em {arquivo} para monitoramento automático.")
 
 def processar_jogo(url_alvo):
-    """Processa um jogo por vez."""
+    """Executa a verificação e atualização de um único jogo."""
     print(f"\n==================================================")
     link, dados_jogo = extrair_link_direto(url_alvo)
     if link:
@@ -422,8 +492,8 @@ if __name__ == "__main__":
             with open(arquivo_jogos, "r", encoding="utf-8") as f:
                 lista_urls = [linha.strip() for linha in f if linha.strip()]
             
-            print(f"🤖 Modo Automático: {len(lista_urls)} jogo(s) na fila...")
+            print(f"🤖 Rodando em modo automático. {len(lista_urls)} jogo(s) para verificar...")
             for url in lista_urls:
                 processar_jogo(url)
         else:
-            print("⚠️ 'jogos.txt' não encontrado ou vazio. Passe uma URL por argumento.")
+            print("⚠️ Nenhuma URL cadastrada no 'jogos.txt'. Adicione uma URL manualmente primeiro.")
