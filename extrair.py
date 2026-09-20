@@ -33,22 +33,8 @@ URL_WORKER = "https://orange-star-d066.claudiokennedymorgy.workers.dev"
 PAGINA_INICIAL_BLOG = "https://k-404modapk.blogspot.com/?m=1"
 FOTO_OFICIAL_SITE = "https://k-404modapk.blogspot.com/favicon.ico"
 
-def ping_sitemap_google(domain_blog):
-    """Notifica o Google enviando um Ping no Sitemap oficial do blog para forçar a indexação."""
-    try:
-        base_domain = domain_blog.split('?')[0].rstrip('/')
-        sitemap_url = f"{base_domain}/sitemap.xml"
-        ping_url = f"https://www.google.com/ping?sitemap={sitemap_url}"
-        res = requests.get(ping_url, timeout=10)
-        if res.status_code in [200, 204]:
-            print(f"📡 Ping de Sitemap enviado com sucesso para o Google: {sitemap_url}")
-        else:
-            print(f"⚠️ Ping de Sitemap retornou status {res.status_code}")
-    except Exception as e:
-        print(f"⚠️ Erro ao enviar ping do Sitemap: {e}")
-
 def notificar_google_indexing_api(url_para_indexar):
-    """Envia solicitação para a Google Indexing API para indexar/atualizar as URLs no Google Search (Desktop e Mobile)."""
+    """Envia solicitação para a Google Indexing API para indexar/atualizar a URL no Google Search."""
     if not GOOGLE_CREDENTIALS_JSON:
         print("⚠️ GOOGLE_CREDENTIALS_JSON não configurado nos Secrets. Pulando Google Indexing.")
         return
@@ -56,18 +42,6 @@ def notificar_google_indexing_api(url_para_indexar):
     if not service_account:
         print("⚠️ Módulo 'google-auth' não encontrado. Certifique-se de adicioná-lo no requirements.txt.")
         return
-
-    # Garante o envio de variações (Desktop e Mobile ?m=1) para indexação 100% completa
-    urls_para_enviar = set()
-    urls_para_enviar.add(url_para_indexar)
-    
-    if "?m=1" in url_para_indexar:
-        urls_para_enviar.add(url_para_indexar.replace("?m=1", ""))
-    else:
-        if "?" in url_para_indexar:
-            urls_para_enviar.add(f"{url_para_indexar}&m=1")
-        else:
-            urls_para_enviar.add(f"{url_para_indexar}?m=1")
 
     try:
         info = json.loads(GOOGLE_CREDENTIALS_JSON)
@@ -83,19 +57,16 @@ def notificar_google_indexing_api(url_para_indexar):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}"
         }
+        payload = {
+            "url": url_para_indexar,
+            "type": "URL_UPDATED"
+        }
 
-        for url_alvo in urls_para_enviar:
-            payload = {
-                "url": url_alvo,
-                "type": "URL_UPDATED"
-            }
-
-            res = requests.post(endpoint, headers=headers, json=payload)
-            if res.status_code == 200:
-                print(f"🚀 Google Indexing API: Solicitada indexação com sucesso -> {url_alvo}")
-            else:
-                print(f"❌ Erro na Google Indexing API ({res.status_code}) para {url_alvo}: {res.text}")
-
+        res = requests.post(endpoint, headers=headers, json=payload)
+        if res.status_code == 200:
+            print(f"🚀 Google Indexing API: Solicitada indexação com sucesso para -> {url_para_indexar}")
+        else:
+            print(f"❌ Erro na Google Indexing API ({res.status_code}): {res.text}")
     except Exception as e:
         print(f"❌ Erro ao enviar para Google Indexing API: {e}")
 
@@ -265,16 +236,10 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
             enviar_notificacao_telegram(nome_jogo, versao_jogo, id_jogo)
             enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo)
             
-            # --- INDEXAÇÃO AUTOMÁTICA COMPLETA NO GOOGLE ---
-            # 1. Notifica a Indexing API para a página inicial do blog (Desktop e Mobile)
+            # --- INDEXAÇÃO AUTOMÁTICA NO GOOGLE ---
             notificar_google_indexing_api(PAGINA_INICIAL_BLOG)
-            
-            # 2. Se a URL de origem for do próprio blog Blogger/k-404, envia para a Indexing API
             if "blogspot.com" in url_origem or "k-404" in url_origem:
                 notificar_google_indexing_api(url_origem)
-
-            # 3. Dispara o Ping de Sitemap para o Google reindexar tudo 100%
-            ping_sitemap_google(PAGINA_INICIAL_BLOG)
 
     except Exception as e:
         print(f"❌ Erro ao salvar no Firebase: {e}")
