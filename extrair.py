@@ -29,8 +29,8 @@ GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 # URL DA SUA CLOUDFLARE WORKER
 URL_WORKER = "https://orange-star-d066.claudiokennedymorgy.workers.dev"
 
-# SEU BLOG OFICIAL
-PAGINA_INICIAL_BLOG = "https://k-404modapk.blogspot.com/?m=1"
+# SEU BLOG OFICIAL (Removido o ?m=1 para envio da URL canônica ao Google)
+PAGINA_INICIAL_BLOG = "https://k-404modapk.blogspot.com/"
 FOTO_OFICIAL_SITE = "https://k-404modapk.blogspot.com/favicon.ico"
 
 def notificar_google_indexing_api(url_para_indexar):
@@ -42,6 +42,9 @@ def notificar_google_indexing_api(url_para_indexar):
     if not service_account:
         print("⚠️ Módulo 'google-auth' não encontrado. Certifique-se de adicioná-lo no requirements.txt.")
         return
+
+    # Remove parâmetros de URL (ex: ?m=1) para enviar a URL canônica aceita pelo Google
+    url_limpa = url_para_indexar.split('?')[0].rstrip('/') if url_para_indexar else url_para_indexar
 
     try:
         info = json.loads(GOOGLE_CREDENTIALS_JSON)
@@ -58,13 +61,13 @@ def notificar_google_indexing_api(url_para_indexar):
             "Authorization": f"Bearer {token}"
         }
         payload = {
-            "url": url_para_indexar,
+            "url": url_limpa,
             "type": "URL_UPDATED"
         }
 
         res = requests.post(endpoint, headers=headers, json=payload)
         if res.status_code == 200:
-            print(f"🚀 Google Indexing API: Solicitada indexação com sucesso para -> {url_para_indexar}")
+            print(f"🚀 Google Indexing API: Solicitada indexação com sucesso para -> {url_limpa}")
         else:
             print(f"❌ Erro na Google Indexing API ({res.status_code}): {res.text}")
     except Exception as e:
@@ -237,7 +240,10 @@ def salvar_no_firebase_se_novo(url_origem, link_novo, dados_jogo):
             enviar_notificacao_whatsapp(nome_jogo, versao_jogo, id_jogo)
             
             # --- INDEXAÇÃO AUTOMÁTICA NO GOOGLE ---
+            # Envia a página inicial do seu blog sem parâmetros extras
             notificar_google_indexing_api(PAGINA_INICIAL_BLOG)
+            
+            # Se a URL de origem for do seu próprio domínio ou postagem, solicita a indexação dela
             if "blogspot.com" in url_origem or "k-404" in url_origem:
                 notificar_google_indexing_api(url_origem)
 
